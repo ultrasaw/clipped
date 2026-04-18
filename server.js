@@ -2,19 +2,15 @@ const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const { createDemoRoom, applyAction } = require("./src/game");
+const { createMockAgentManager } = require("./src/agents");
+const { getPublicState } = require("./src/publicState");
 
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, "public");
 
-const clients = new Set();
-const messages = [
-  {
-    id: crypto.randomUUID(),
-    sender: "System",
-    text: "Welcome to the prototype room.",
-    createdAt: Date.now(),
-  },
-];
+const clients = new Map();
+const room = createDemoRoom();
 
 function sendJson(res, statusCode, payload) {
   const body = JSON.stringify(payload);
@@ -32,7 +28,7 @@ function readBody(req) {
     req.on("data", (chunk) => {
       body += chunk;
 
-      if (body.length > 10_000) {
+      if (body.length > 20_000) {
         reject(new Error("Request body is too large."));
         req.destroy();
       }
@@ -43,60 +39,120 @@ function readBody(req) {
   });
 }
 
-function broadcast(event, payload) {
-  const frame = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
+function sendEvent(res, event, payload) {
+  res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+}
 
-  for (const client of clients) {
-    client.write(frame);
+function broadcastState() {
+  for (const client of clients.values()) {
+    sendEvent(client.res, "state", getPublicState(room, client.playerId));
   }
 }
 
-function handleEvents(req, res) {
+const agentManager = createMockAgentManager({
+  applyAction,
+  broadcastState,
+});
+
+function applyAndBroadcast(action, context = {}) {
+  const previousPhase = room.phase;
+  const result = applyAction(room, action, context);
+
+  if (!result.ok) {
+    room.errors.push(result.error);
+  }
+
+  broadcastState();
+
+  if (result.ok && room.phase !== previousPhase) {
+    agentManager.handlePhaseEntered(room);
+    broadcastState();
+  }
+
+  return result;
+}
+
+function handleEvents(req, res, url) {
+  const clientId = crypto.randomUUID();
+  const playerId = url.searchParams.get("playerId") || null;
+
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-cache, no-transform",
     connection: "keep-alive",
   });
 
-  res.write(`event: snapshot\ndata: ${JSON.stringify({ messages })}\n\n`);
-  clients.add(res);
+  clients.set(clientId, { res, playerId });
+  sendEvent(res, "state", getPublicState(room, playerId));
 
   req.on("close", () => {
-    clients.delete(res);
+    clients.delete(clientId);
   });
 }
 
-async function handlePostMessage(req, res) {
+async function handlePostAction(req, res) {
   try {
     const rawBody = await readBody(req);
     const body = JSON.parse(rawBody || "{}");
+    const playerId = typeof body.playerId === "string" ? body.playerId : null;
+    const action = normalizeAction(body.action || {}, playerId);
+    const result = applyAndBroadcast(action, { connectionId: playerId || null });
 
-    const sender = String(body.sender || "").trim().slice(0, 24);
-    const text = String(body.text || "").trim().slice(0, 500);
-
-    if (!sender || !text) {
-      sendJson(res, 400, { error: "Sender and message text are required." });
-      return;
-    }
-
-    const message = {
-      id: crypto.randomUUID(),
-      sender,
-      text,
-      createdAt: Date.now(),
-    };
-
-    messages.push(message);
-
-    if (messages.length > 100) {
-      messages.shift();
-    }
-
-    broadcast("message", message);
-    sendJson(res, 201, { message });
+    sendJson(res, result.ok ? 200 : 400, result);
   } catch (error) {
-    sendJson(res, 400, { error: error.message || "Invalid request." });
+    sendJson(res, 400, { ok: false, error: error.message || "Invalid request." });
   }
+}
+
+function normalizeAction(action, playerId) {
+  if (action.type === "JOIN_ROOM") {
+    return {
+      type: "JOIN_ROOM",
+      name: action.name,
+      playerId,
+    };
+  }
+
+  if (action.type === "SUBMIT_SPARK") {
+    return {
+      type: "SUBMIT_SPARK",
+      playerId,
+      text: action.text,
+    };
+  }
+
+  if (action.type === "SEND_CHAT") {
+    return {
+      type: "SEND_CHAT",
+      playerId,
+      text: action.text,
+    };
+  }
+
+  if (action.type === "SUBMIT_FINAL") {
+    return {
+      type: "SUBMIT_FINAL",
+      playerId,
+      text: action.text,
+    };
+  }
+
+  if (action.type === "CAST_VOTE") {
+    return {
+      type: "CAST_VOTE",
+      voterId: playerId,
+      targetId: action.targetId,
+    };
+  }
+
+  return {
+    type: action.type,
+  };
+}
+
+function handleGetState(req, res, url) {
+  const playerId = url.searchParams.get("playerId") || null;
+  sendJson(res, 200, getPublicState(room, playerId));
 }
 
 function serveStatic(req, res) {
@@ -135,12 +191,17 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   if (req.method === "GET" && url.pathname === "/events") {
-    handleEvents(req, res);
+    handleEvents(req, res, url);
     return;
   }
 
-  if (req.method === "POST" && url.pathname === "/messages") {
-    handlePostMessage(req, res);
+  if (req.method === "GET" && url.pathname === "/state") {
+    handleGetState(req, res, url);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/actions") {
+    handlePostAction(req, res);
     return;
   }
 
@@ -149,9 +210,9 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  sendJson(res, 405, { error: "Method not allowed." });
+  sendJson(res, 405, { ok: false, error: "Method not allowed." });
 });
 
 server.listen(PORT, () => {
-  console.log(`Chat prototype running at http://localhost:${PORT}`);
+  console.log(`Game prototype running at http://localhost:${PORT}`);
 });

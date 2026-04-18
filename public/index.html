@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Clipped Chat Prototype</title>
+    <title>Clipped Game Prototype</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -12,48 +12,77 @@
         <p class="eyebrow">Clipped Prototype</p>
         <h1>Find the real voice in the room.</h1>
         <p class="lede">
-          A tiny live chat foundation for testing the social deduction loop before
-          we commit to heavier game architecture.
+          A server-owned game loop now sits above the chat. Humans and agents
+          both submit actions; the game controller decides what is legal.
         </p>
+
+        <section class="briefing" aria-label="Your role">
+          <p class="eyebrow">You</p>
+          <p id="viewerBriefing">Join the lobby to receive your role briefing.</p>
+        </section>
       </section>
 
-      <section class="card" aria-label="Chat room">
-        <header class="chat-header">
+      <section class="game-card" aria-label="Game room">
+        <header class="game-header">
           <div>
-            <p class="eyebrow">Room</p>
-            <h2>Prototype Chat</h2>
+            <p class="eyebrow">Demo Room</p>
+            <h2 id="phaseTitle">Connecting</h2>
+            <p id="phaseMeta" class="phase-meta">Waiting for state...</p>
           </div>
           <span id="connectionStatus" class="status">Connecting</span>
         </header>
 
-        <ol id="messages" class="messages" aria-live="polite"></ol>
+        <section class="controls" aria-label="Lobby and developer controls">
+          <form id="joinForm" class="join-form">
+            <label class="field">
+              <span>Name</span>
+              <input
+                id="nameInput"
+                name="name"
+                maxlength="24"
+                placeholder="Player name"
+                autocomplete="nickname"
+                required
+              />
+            </label>
+            <button type="submit">Join</button>
+          </form>
 
-        <form id="chatForm" class="composer">
-          <label class="field">
-            <span>Name</span>
-            <input
-              id="senderInput"
-              name="sender"
-              maxlength="24"
-              placeholder="Player name"
-              autocomplete="nickname"
-              required
-            />
-          </label>
+          <div class="dev-controls">
+            <button id="startButton" type="button">Start</button>
+            <button id="advanceButton" type="button" class="secondary">Advance</button>
+            <button id="resetButton" type="button" class="ghost">Reset</button>
+          </div>
+        </section>
 
+        <section class="room-layout">
+          <aside class="players-panel" aria-label="Players">
+            <div class="panel-heading">
+              <p class="eyebrow">Players</p>
+              <span id="playerCount">0</span>
+            </div>
+            <ol id="players" class="players"></ol>
+          </aside>
+
+          <section class="main-panel">
+            <section id="sparkPanel" class="spark-panel hidden" aria-label="Spark prompt"></section>
+            <ol id="messages" class="messages" aria-live="polite"></ol>
+            <section id="votePanel" class="vote-panel hidden" aria-label="Vote"></section>
+          </section>
+        </section>
+
+        <form id="actionForm" class="composer">
           <label class="field message-field">
-            <span>Message</span>
+            <span id="actionLabel">Message</span>
             <input
-              id="messageInput"
+              id="actionInput"
               name="message"
               maxlength="500"
-              placeholder="Say something suspiciously normal..."
+              placeholder="Join and start the game..."
               autocomplete="off"
-              required
             />
           </label>
-
-          <button type="submit">Send</button>
+          <button id="sendButton" type="submit">Send</button>
         </form>
       </section>
     </main>

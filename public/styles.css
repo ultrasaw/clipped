@@ -79,9 +79,22 @@ h2 {
   line-height: 1.6;
 }
 
-.card {
+.briefing {
+  margin-top: 2rem;
+  border: 1px solid var(--line);
+  border-radius: 1.3rem;
+  padding: 1rem;
+  background: rgba(255, 252, 245, 0.48);
+}
+
+.briefing p:last-child {
+  margin-bottom: 0;
+  line-height: 1.5;
+}
+
+.game-card {
   display: grid;
-  grid-template-rows: auto minmax(22rem, 52vh) auto;
+  grid-template-rows: auto auto minmax(22rem, 52vh) auto;
   overflow: hidden;
   min-height: 42rem;
   border: 1px solid var(--line);
@@ -92,12 +105,18 @@ h2 {
   animation: rise 520ms 120ms ease-out both;
 }
 
-.chat-header {
+.game-header {
   display: flex;
   justify-content: space-between;
   gap: 1rem;
   padding: 1.25rem;
   border-bottom: 1px solid var(--line);
+}
+
+.phase-meta {
+  margin: 0.65rem 0 0;
+  color: var(--muted);
+  font-size: 0.95rem;
 }
 
 .status {
@@ -113,6 +132,109 @@ h2 {
 
 .status.connected {
   color: var(--green);
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: minmax(16rem, 1fr) auto;
+  gap: 1rem;
+  align-items: end;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 248, 236, 0.54);
+}
+
+.join-form,
+.dev-controls {
+  display: flex;
+  gap: 0.65rem;
+  align-items: end;
+}
+
+.join-form .field {
+  flex: 1;
+}
+
+.room-layout {
+  display: grid;
+  grid-template-columns: minmax(11rem, 0.38fr) minmax(0, 1fr);
+  min-height: 0;
+}
+
+.players-panel {
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.panel-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.players {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0.8rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.player {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  padding: 0.65rem 0.75rem;
+  background: rgba(255, 255, 255, 0.48);
+  color: var(--ink);
+  font-family: "Trebuchet MS", Verdana, sans-serif;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.player.ejected {
+  opacity: 0.58;
+  text-decoration: line-through;
+}
+
+.player.you {
+  border-color: rgba(35, 122, 87, 0.42);
+  background: rgba(35, 122, 87, 0.12);
+}
+
+.main-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 0;
+}
+
+.spark-panel,
+.vote-panel {
+  border-bottom: 1px solid var(--line);
+  padding: 1rem 1.25rem;
+  background: rgba(255, 255, 255, 0.34);
+}
+
+.spark-panel h3,
+.vote-panel h3 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.spark-panel ul {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.8rem 0 0;
+  padding-left: 1.2rem;
+}
+
+.hidden {
+  display: none;
 }
 
 .messages {
@@ -131,6 +253,17 @@ h2 {
   border-radius: 1.1rem;
   padding: 0.8rem 0.95rem;
   background: rgba(255, 255, 255, 0.54);
+}
+
+.message.system {
+  align-self: center;
+  max-width: 92%;
+  background: rgba(23, 19, 15, 0.06);
+}
+
+.message.final {
+  border-color: rgba(217, 93, 57, 0.32);
+  background: rgba(217, 93, 57, 0.11);
 }
 
 .message.own {
@@ -154,9 +287,27 @@ h2 {
   line-height: 1.4;
 }
 
+.vote-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: 0.65rem;
+  margin-top: 0.85rem;
+}
+
+.vote-card {
+  border: 1px solid rgba(217, 93, 57, 0.24);
+  border-radius: 1rem;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.vote-card:hover {
+  color: white;
+}
+
 .composer {
   display: grid;
-  grid-template-columns: minmax(8rem, 0.6fr) minmax(12rem, 1.4fr) auto;
+  grid-template-columns: minmax(12rem, 1fr) auto;
   gap: 0.75rem;
   padding: 1.25rem;
   border-top: 1px solid var(--line);
@@ -206,6 +357,34 @@ button:hover {
   background: var(--accent-dark);
 }
 
+button.secondary {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--line);
+}
+
+button.secondary:hover {
+  color: white;
+  background: var(--accent-dark);
+}
+
+button.ghost {
+  color: var(--accent-dark);
+  background: transparent;
+  border: 1px solid rgba(217, 93, 57, 0.28);
+}
+
+button.ghost:hover {
+  color: white;
+  background: var(--accent-dark);
+}
+
+button:disabled,
+input:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
 @keyframes rise {
   from {
     opacity: 0;
@@ -228,8 +407,23 @@ button:hover {
     max-width: 100%;
   }
 
-  .card {
+  .game-card {
     min-height: 38rem;
+  }
+
+  .controls,
+  .room-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .players-panel {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .join-form,
+  .dev-controls {
+    flex-wrap: wrap;
   }
 
   .composer {
