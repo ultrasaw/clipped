@@ -1,0 +1,24 @@
+#!/bin/bash
+set -euo pipefail
+exec > >(tee /var/log/k3s-init.log) 2>&1
+
+# Mount the data volume (Hetzner attaches as /dev/disk/by-id/scsi-0HC_Volume_*)
+mkdir -p ${data_volume_mount}
+VOLUME_DEV=$(ls /dev/disk/by-id/scsi-0HC_Volume_* 2>/dev/null | head -1 || true)
+if [ -n "$VOLUME_DEV" ]; then
+  if ! mountpoint -q ${data_volume_mount}; then
+    mount -o discard,defaults "$VOLUME_DEV" ${data_volume_mount}
+  fi
+  grep -q "${data_volume_mount}" /etc/fstab || \
+    echo "$VOLUME_DEV ${data_volume_mount} ext4 discard,nofail,defaults 0 0" >> /etc/fstab
+fi
+
+PUBLIC_IP=$(curl -s http://169.254.169.254/hetzner/v1/metadata/public-ipv4)
+
+curl -sfL https://get.k3s.io | \
+  INSTALL_K3S_VERSION="${k3s_version}" sh -s - server \
+  --token "${k3s_token}" \
+  --tls-san "$PUBLIC_IP" \
+  --disable traefik
+
+until /usr/local/bin/kubectl get nodes 2>/dev/null; do sleep 5; done
