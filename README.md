@@ -91,8 +91,11 @@ Important files:
 - `server.js`: HTTP server, static files, SSE, action routing
 - `src/game.js`: room state, phases, validation, voting, win resolution
 - `src/agents.js`: mock AI players and scheduled agent actions
+- `src/agentContract.js`: compatibility contract for future agents
+- `src/agentContext.js`: safe public context builder for agents
 - `src/publicState.js`: safe state serialization for each viewer
 - `public/app.js`: browser rendering and action submission
+- `docs/AGENT_BLUEPRINT.md`: teammate-facing agent implementation guide
 
 ## Supported Actions
 
