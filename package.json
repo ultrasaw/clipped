@@ -1,0 +1,13 @@
+{
+  "name": "clipped",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prototype for a social deduction chat game.",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

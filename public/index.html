@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Clipped Chat Prototype</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Clipped Prototype</p>
+        <h1>Find the real voice in the room.</h1>
+        <p class="lede">
+          A tiny live chat foundation for testing the social deduction loop before
+          we commit to heavier game architecture.
+        </p>
+      </section>
+
+      <section class="card" aria-label="Chat room">
+        <header class="chat-header">
+          <div>
+            <p class="eyebrow">Room</p>
+            <h2>Prototype Chat</h2>
+          </div>
+          <span id="connectionStatus" class="status">Connecting</span>
+        </header>
+
+        <ol id="messages" class="messages" aria-live="polite"></ol>
+
+        <form id="chatForm" class="composer">
+          <label class="field">
+            <span>Name</span>
+            <input
+              id="senderInput"
+              name="sender"
+              maxlength="24"
+              placeholder="Player name"
+              autocomplete="nickname"
+              required
+            />
+          </label>
+
+          <label class="field message-field">
+            <span>Message</span>
+            <input
+              id="messageInput"
+              name="message"
+              maxlength="500"
+              placeholder="Say something suspiciously normal..."
+              autocomplete="off"
+              required
+            />
+          </label>
+
+          <button type="submit">Send</button>
+        </form>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

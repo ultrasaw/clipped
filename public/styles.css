@@ -1,0 +1,242 @@
+:root {
+  --ink: #17130f;
+  --muted: #6f665c;
+  --paper: #fff8ec;
+  --card: rgba(255, 252, 245, 0.86);
+  --line: rgba(49, 39, 28, 0.14);
+  --accent: #d95d39;
+  --accent-dark: #86351f;
+  --green: #237a57;
+  --shadow: 0 24px 80px rgba(68, 42, 18, 0.2);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  background:
+    radial-gradient(circle at 15% 20%, rgba(217, 93, 57, 0.28), transparent 28rem),
+    radial-gradient(circle at 85% 5%, rgba(35, 122, 87, 0.18), transparent 24rem),
+    linear-gradient(135deg, #f9e3bc 0%, #fff8ec 42%, #f3c9a2 100%);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.shell {
+  display: grid;
+  grid-template-columns: minmax(16rem, 0.8fr) minmax(20rem, 1.2fr);
+  gap: 2rem;
+  width: min(1120px, calc(100% - 2rem));
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 4rem 0;
+  align-items: center;
+}
+
+.hero {
+  animation: rise 520ms ease-out both;
+}
+
+.eyebrow {
+  margin: 0 0 0.5rem;
+  color: var(--accent-dark);
+  font-family: "Trebuchet MS", Verdana, sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+h1,
+h2 {
+  margin: 0;
+  line-height: 0.95;
+}
+
+h1 {
+  max-width: 11ch;
+  font-size: clamp(3.4rem, 9vw, 7.8rem);
+  letter-spacing: -0.07em;
+}
+
+h2 {
+  font-size: clamp(1.7rem, 4vw, 2.5rem);
+  letter-spacing: -0.04em;
+}
+
+.lede {
+  max-width: 34rem;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1.6;
+}
+
+.card {
+  display: grid;
+  grid-template-rows: auto minmax(22rem, 52vh) auto;
+  overflow: hidden;
+  min-height: 42rem;
+  border: 1px solid var(--line);
+  border-radius: 2rem;
+  background: var(--card);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
+  animation: rise 520ms 120ms ease-out both;
+}
+
+.chat-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.25rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.status {
+  align-self: start;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  color: var(--muted);
+  font-family: "Trebuchet MS", Verdana, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.status.connected {
+  color: var(--green);
+}
+
+.messages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  overflow-y: auto;
+  margin: 0;
+  padding: 1.25rem;
+  list-style: none;
+}
+
+.message {
+  max-width: 78%;
+  border: 1px solid var(--line);
+  border-radius: 1.1rem;
+  padding: 0.8rem 0.95rem;
+  background: rgba(255, 255, 255, 0.54);
+}
+
+.message.own {
+  align-self: flex-end;
+  background: rgba(217, 93, 57, 0.14);
+}
+
+.message-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.35rem;
+  color: var(--muted);
+  font-family: "Trebuchet MS", Verdana, sans-serif;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.message-text {
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+
+.composer {
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.6fr) minmax(12rem, 1.4fr) auto;
+  gap: 0.75rem;
+  padding: 1.25rem;
+  border-top: 1px solid var(--line);
+  background: rgba(255, 248, 236, 0.76);
+}
+
+.field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.field span {
+  color: var(--muted);
+  font-family: "Trebuchet MS", Verdana, sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.8rem 1rem;
+  color: var(--ink);
+  background: white;
+  outline: none;
+}
+
+input:focus {
+  border-color: rgba(217, 93, 57, 0.62);
+  box-shadow: 0 0 0 4px rgba(217, 93, 57, 0.12);
+}
+
+button {
+  align-self: end;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.85rem 1.15rem;
+  color: white;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--accent-dark);
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 820px) {
+  .shell {
+    grid-template-columns: 1fr;
+    padding: 2rem 0;
+  }
+
+  h1 {
+    max-width: 100%;
+  }
+
+  .card {
+    min-height: 38rem;
+  }
+
+  .composer {
+    grid-template-columns: 1fr;
+  }
+
+  button {
+    width: 100%;
+  }
+}
