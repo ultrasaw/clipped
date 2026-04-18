@@ -1,0 +1,8 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+cloud_infrastructure
+k8s
+README.md
+GDD.md

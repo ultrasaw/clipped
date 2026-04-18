@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: clipped
+  namespace: clipped
+spec:
+  selector:
+    app: clipped
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

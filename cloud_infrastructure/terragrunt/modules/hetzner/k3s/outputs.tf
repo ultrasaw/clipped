@@ -26,21 +26,32 @@ output "post_apply_notice" {
     K3s cloud-init is still running on the instance.
     Wait ~3 minutes, then retrieve and merge the kubeconfig:
 
+      mkdir -p ~/.ssh ~/.kube
       cd k3s
       terragrunt output -raw ssh_private_key > ~/.ssh/k3s-${var.env}.pem
       chmod 600 ~/.ssh/k3s-${var.env}.pem
 
       K3S_IP=$(terragrunt output -raw k3s_public_ip)
-      ssh -o StrictHostKeyChecking=no -i ~/.ssh/k3s-${var.env}.pem root@$K3S_IP \
-        'sed "s/127.0.0.1/'$K3S_IP'/g" /etc/rancher/k3s/k3s.yaml' \
-        | sed 's/: default$/: hetzner-${var.env}/g' \
-        > ~/.kube/k3s-${var.env}.yaml
+      KUBE_CONTEXT=hetzner-${var.env}-k3s
+      KUBE_FILE="$HOME/.kube/$${KUBE_CONTEXT}.yaml"
+      BASE_KUBECONFIG="$${KUBECONFIG:-$HOME/.kube/config}"
 
-      KUBECONFIG=~/.kube/config:~/.kube/k3s-${var.env}.yaml \
+      ssh -o StrictHostKeyChecking=no -i ~/.ssh/k3s-${var.env}.pem root@$K3S_IP \
+        'cat /etc/rancher/k3s/k3s.yaml' \
+        | sed \
+            -e "s/127.0.0.1/$${K3S_IP}/g" \
+            -e "s/name: default$/name: $${KUBE_CONTEXT}/g" \
+            -e "s/current-context: default$/current-context: $${KUBE_CONTEXT}/g" \
+            -e "s/cluster: default$/cluster: $${KUBE_CONTEXT}/g" \
+            -e "s/user: default$/user: $${KUBE_CONTEXT}/g" \
+        > "$KUBE_FILE"
+
+      KUBECONFIG="$${BASE_KUBECONFIG}:$${KUBE_FILE}" \
         kubectl config view --flatten > ~/.kube/config.merged \
         && mv ~/.kube/config.merged ~/.kube/config
 
-      kubectl config use-context hetzner-${var.env}
+      export KUBECONFIG="$HOME/.kube/config"
+      kubectl config use-context "$${KUBE_CONTEXT}"
       kubectl get nodes
     ============================================================
   EOT

@@ -6,6 +6,7 @@ Thumbs.db
 .terraform/
 *.tfstate
 *.tfstate.*
+k8s/*.secret.yaml
 crash.log
 crash.*.log
 override.tf
