@@ -26,6 +26,14 @@ function sendJson(res, statusCode, payload) {
   res.end(body);
 }
 
+function sendHtml(res, statusCode, html) {
+  res.writeHead(statusCode, {
+    "content-type": "text/html; charset=utf-8",
+    "content-length": Buffer.byteLength(html),
+  });
+  res.end(html);
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let body = "";
@@ -296,8 +304,8 @@ function handleGetState(req, res, url) {
   sendJson(res, 200, getPublicState(room, playerId));
 }
 
-function handleHealth(req, res) {
-  sendJson(res, 200, {
+function getHealthPayload() {
+  return {
     ok: true,
     phase: room.phase,
     round: room.round,
@@ -308,16 +316,39 @@ function handleHealth(req, res) {
     messages: room.messages.length,
     events: room.events.length,
     uptimeSeconds: Math.floor(process.uptime()),
-  });
+    waitingFor: describeWaitingFor(room),
+  };
 }
 
-function handleDebugEvents(req, res) {
-  sendJson(res, 200, {
+function handleHealth(req, res, url) {
+  const payload = getHealthPayload();
+
+  if (wantsJson(req, url)) {
+    sendJson(res, 200, payload);
+    return;
+  }
+
+  sendHtml(res, 200, renderHealthPage(payload));
+}
+
+function getDebugEventsPayload() {
+  return {
     roomId: room.id,
     phase: room.phase,
     round: room.round,
     events: room.events,
-  });
+  };
+}
+
+function handleDebugEvents(req, res, url) {
+  const payload = getDebugEventsPayload();
+
+  if (wantsJson(req, url)) {
+    sendJson(res, 200, payload);
+    return;
+  }
+
+  sendHtml(res, 200, renderDebugEventsPage(payload));
 }
 
 function serveStatic(req, res) {
@@ -368,12 +399,12 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === "GET" && url.pathname === "/health") {
-    handleHealth(req, res);
+    handleHealth(req, res, url);
     return;
   }
 
   if (req.method === "GET" && url.pathname === "/debug/events") {
-    handleDebugEvents(req, res);
+    handleDebugEvents(req, res, url);
     return;
   }
 
@@ -393,6 +424,367 @@ const server = http.createServer((req, res) => {
 
 function shortId(id) {
   return id ? id.slice(0, 8) : "none";
+}
+
+function wantsJson(req, url) {
+  if (url.searchParams.get("format") === "json") {
+    return true;
+  }
+
+  if (url.searchParams.get("format") === "html") {
+    return false;
+  }
+
+  const accept = String(req.headers.accept || "");
+
+  return !accept.includes("text/html");
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => {
+    const entities = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#039;",
+    };
+
+    return entities[char];
+  });
+}
+
+function formatDuration(seconds) {
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+
+  return minutes ? `${minutes}m ${remainder}s` : `${remainder}s`;
+}
+
+function renderDebugShell({ title, eyebrow, body }) {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="refresh" content="5" />
+    <title>${escapeHtml(title)}</title>
+    <style>
+      :root {
+        --ink: #17130f;
+        --muted: #756a5f;
+        --paper: #fff8ec;
+        --card: rgba(255, 252, 245, 0.88);
+        --line: rgba(49, 39, 28, 0.14);
+        --accent: #d95d39;
+        --green: #237a57;
+        --yellow: #a66b00;
+        --red: #a9362b;
+        --shadow: 0 24px 80px rgba(68, 42, 18, 0.18);
+      }
+      * { box-sizing: border-box; }
+      body {
+        min-height: 100vh;
+        margin: 0;
+        color: var(--ink);
+        font-family: Georgia, "Times New Roman", serif;
+        background:
+          radial-gradient(circle at 18% 16%, rgba(217, 93, 57, 0.26), transparent 28rem),
+          radial-gradient(circle at 88% 8%, rgba(35, 122, 87, 0.18), transparent 24rem),
+          linear-gradient(135deg, #f9e3bc 0%, #fff8ec 44%, #f3c9a2 100%);
+      }
+      main {
+        width: min(1120px, calc(100% - 2rem));
+        margin: 0 auto;
+        padding: 3rem 0;
+      }
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        align-items: start;
+        margin-bottom: 1.5rem;
+      }
+      .eyebrow {
+        margin: 0 0 0.45rem;
+        color: var(--accent);
+        font-family: "Trebuchet MS", Verdana, sans-serif;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+      h1 {
+        margin: 0;
+        font-size: clamp(2.4rem, 6vw, 5.4rem);
+        line-height: 0.92;
+        letter-spacing: -0.06em;
+      }
+      .links {
+        display: flex;
+        gap: 0.6rem;
+        flex-wrap: wrap;
+        justify-content: end;
+      }
+      a, .pill {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 0.45rem 0.75rem;
+        color: var(--ink);
+        background: rgba(255, 255, 255, 0.52);
+        font-family: "Trebuchet MS", Verdana, sans-serif;
+        font-size: 0.78rem;
+        font-weight: 700;
+        text-decoration: none;
+      }
+      a:hover { color: white; background: var(--accent); }
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 1.8rem;
+        padding: 1.25rem;
+        background: var(--card);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(18px);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+        gap: 0.85rem;
+      }
+      .metric {
+        border: 1px solid var(--line);
+        border-radius: 1.2rem;
+        padding: 1rem;
+        background: rgba(255, 255, 255, 0.48);
+      }
+      .metric strong {
+        display: block;
+        margin-top: 0.3rem;
+        font-size: 1.7rem;
+        line-height: 1;
+      }
+      .ok { color: var(--green); }
+      .warn { color: var(--yellow); }
+      .bad { color: var(--red); }
+      .timeline {
+        display: grid;
+        gap: 0.75rem;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .event {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 0.8rem;
+        border: 1px solid var(--line);
+        border-radius: 1.1rem;
+        padding: 0.85rem;
+        background: rgba(255, 255, 255, 0.5);
+      }
+      .dot {
+        width: 0.8rem;
+        height: 0.8rem;
+        margin-top: 0.25rem;
+        border-radius: 50%;
+        background: var(--accent);
+      }
+      .event[data-kind*="REJECTED"] .dot, .event[data-kind*="EJECTED"] .dot { background: var(--red); }
+      .event[data-kind*="PHASE"] .dot, .event[data-kind*="STARTED"] .dot { background: var(--green); }
+      .event h2 {
+        margin: 0;
+        font-family: "Trebuchet MS", Verdana, sans-serif;
+        font-size: 0.92rem;
+        letter-spacing: 0.03em;
+      }
+      .event p {
+        margin: 0.35rem 0 0;
+        color: var(--muted);
+        line-height: 1.45;
+      }
+      pre {
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: 1rem;
+        padding: 0.9rem;
+        background: rgba(23, 19, 15, 0.06);
+        color: var(--ink);
+      }
+      .section-title {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        align-items: center;
+        margin: 2rem 0 0.8rem;
+      }
+      @media (max-width: 720px) {
+        .topbar { display: grid; }
+        .links { justify-content: start; }
+        .event { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="topbar">
+        <div>
+          <p class="eyebrow">${escapeHtml(eyebrow)}</p>
+          <h1>${escapeHtml(title)}</h1>
+        </div>
+        <nav class="links">
+          <a href="/">Game</a>
+          <a href="/health">Health</a>
+          <a href="/debug/events">Events</a>
+          <a href="?format=json">JSON</a>
+        </nav>
+      </section>
+      ${body}
+    </main>
+  </body>
+</html>`;
+}
+
+function renderHealthPage(payload) {
+  const statusClass = payload.ok ? "ok" : "bad";
+  const body = `
+    <section class="card">
+      <div class="grid">
+        ${renderMetric("Status", payload.ok ? "OK" : "Down", statusClass)}
+        ${renderMetric("Phase", payload.phase)}
+        ${renderMetric("Round", `${payload.round}/${payload.maxRounds}`)}
+        ${renderMetric("Players", payload.players)}
+        ${renderMetric("Alive", payload.alivePlayers)}
+        ${renderMetric("Clients", payload.clients)}
+        ${renderMetric("Messages", payload.messages)}
+        ${renderMetric("Events", payload.events)}
+        ${renderMetric("Uptime", formatDuration(payload.uptimeSeconds))}
+      </div>
+    </section>
+    <section class="section-title">
+      <div>
+        <p class="eyebrow">Waiting For</p>
+        <span class="pill">${escapeHtml(payload.waitingFor)}</span>
+      </div>
+      <span class="pill">Auto-refreshes every 5s</span>
+    </section>
+    <section class="card">
+      <pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>
+    </section>
+  `;
+
+  return renderDebugShell({
+    title: "Server Health",
+    eyebrow: "Clipped Diagnostics",
+    body,
+  });
+}
+
+function renderMetric(label, value, className = "") {
+  return `
+    <div class="metric">
+      <p class="eyebrow">${escapeHtml(label)}</p>
+      <strong class="${escapeHtml(className)}">${escapeHtml(value)}</strong>
+    </div>
+  `;
+}
+
+function renderDebugEventsPage(payload) {
+  const newestFirst = [...payload.events].reverse();
+  const body = `
+    <section class="card">
+      <div class="grid">
+        ${renderMetric("Room", payload.roomId)}
+        ${renderMetric("Phase", payload.phase)}
+        ${renderMetric("Round", payload.round)}
+        ${renderMetric("Events", payload.events.length)}
+      </div>
+    </section>
+    <section class="section-title">
+      <div>
+        <p class="eyebrow">Timeline</p>
+        <span class="pill">Newest first</span>
+      </div>
+      <span class="pill">Auto-refreshes every 5s</span>
+    </section>
+    <ol class="timeline">
+      ${
+        newestFirst.length
+          ? newestFirst.map(renderEventItem).join("")
+          : `<li class="event" data-kind="EMPTY"><span class="dot"></span><div><h2>No events yet</h2><p>Start a game to populate the flight recorder.</p></div></li>`
+      }
+    </ol>
+  `;
+
+  return renderDebugShell({
+    title: "Room Events",
+    eyebrow: "Clipped Flight Recorder",
+    body,
+  });
+}
+
+function renderEventItem(event) {
+  const { at, type, ...details } = event;
+  const time = new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(new Date(at));
+  const summary = summarizeEvent(event);
+
+  return `
+    <li class="event" data-kind="${escapeHtml(type)}">
+      <span class="dot"></span>
+      <div>
+        <h2>${escapeHtml(type)} <span class="pill">${escapeHtml(time)}</span></h2>
+        <p>${escapeHtml(summary)}</p>
+        <pre>${escapeHtml(JSON.stringify(details, null, 2))}</pre>
+      </div>
+    </li>
+  `;
+}
+
+function summarizeEvent(event) {
+  if (event.type === "ACTION_ACCEPTED") {
+    return `${event.source || "unknown"} action ${event.actionType} accepted.`;
+  }
+
+  if (event.type === "ACTION_REJECTED") {
+    return `${event.source || "unknown"} action ${event.actionType} rejected: ${event.error}`;
+  }
+
+  if (event.type === "PHASE_CHANGED") {
+    return `Phase moved from ${event.from} to ${event.to}.`;
+  }
+
+  if (event.type === "PLAYER_JOINED") {
+    return `${event.playerName} joined the lobby.`;
+  }
+
+  if (event.type === "PLAYER_REJOINED") {
+    return `${event.playerName} rejoined.`;
+  }
+
+  if (event.type === "PLAYER_EJECTED") {
+    return `${event.playerName} was ejected and revealed as ${event.revealedRole}.`;
+  }
+
+  if (event.type === "GAME_STARTED") {
+    return `Game started with ${event.playerCount} players.`;
+  }
+
+  if (event.type === "GAME_OVER") {
+    return event.summary || "Game ended.";
+  }
+
+  if (event.type === "ROOM_RESET") {
+    return "Room was reset.";
+  }
+
+  if (event.type === "VOTE_RESOLVED") {
+    return `Vote resolved with outcome: ${event.outcome}.`;
+  }
+
+  return "Event recorded.";
 }
 
 function describeActor(currentRoom, playerId) {

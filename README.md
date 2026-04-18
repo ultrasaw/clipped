@@ -119,7 +119,14 @@ These endpoints help with deployment and playtest debugging.
 
 ### `GET /health`
 
-Returns a compact server status payload without hidden role information.
+Opens a visual server status page in the browser. It can also return compact
+JSON status without hidden role information.
+
+JSON form:
+
+```text
+GET /health?format=json
+```
 
 Example:
 
@@ -140,11 +147,17 @@ Example:
 
 ### `GET /debug/events`
 
-Returns the current room's structured event log.
+Opens a visual timeline of the current room's structured event log.
 
 This is intended for development and playtest debugging. It records accepted and
 rejected actions, phase changes, joins, ejections, game start, game over, and
 room resets.
+
+JSON form:
+
+```text
+GET /debug/events?format=json
+```
 
 Example:
 
