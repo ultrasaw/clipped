@@ -77,9 +77,10 @@ const agentManager = createMockAgentManager({
   submitAction: applyAndBroadcast,
 });
 
-function applyAndBroadcast(action, context = {}) {
+async function applyAndBroadcast(action, context = {}) {
   const previousPhase = room.phase;
   const before = summarizeRoom(room);
+  const previousEventCount = room.events.length;
 
   logger.info("action received", {
     source: context.source || "client",
@@ -90,7 +91,7 @@ function applyAndBroadcast(action, context = {}) {
     round: room.round,
   });
 
-  const result = applyAction(room, action, context);
+  const result = await applyAction(room, action, context);
 
   if (!result.ok) {
     room.errors.push(result.error);
@@ -137,6 +138,8 @@ function applyAndBroadcast(action, context = {}) {
     maybeScheduleAutoAdvance();
   }
 
+  logNewEvents(previousEventCount);
+
   return result;
 }
 
@@ -153,6 +156,19 @@ function handlePhaseChanged(previousPhase) {
   schedulePhaseTimer();
   maybeScheduleAutoAdvance();
   broadcastState();
+}
+
+function logNewEvents(previousEventCount) {
+  const newEvents = room.events.slice(previousEventCount);
+
+  for (const event of newEvents) {
+    logger.info("room event", {
+      type: event.type,
+      phase: event.phase,
+      round: event.round,
+      details: event,
+    });
+  }
 }
 
 function schedulePhaseTimer() {
@@ -172,7 +188,9 @@ function schedulePhaseTimer() {
   phaseTimer = setTimeout(() => {
     phaseTimer = null;
     logger.info("phase timer elapsed", { phase: room.phase, waitingFor: describeWaitingFor(room) });
-    applyAndBroadcast({ type: "ADVANCE_PHASE" }, { source: "timer" });
+    applyAndBroadcast({ type: "ADVANCE_PHASE" }, { source: "timer" }).catch((error) => {
+      logger.error("phase timer advance failed", { error: error.message || String(error) });
+    });
   }, delayMs);
 }
 
@@ -197,7 +215,9 @@ function maybeScheduleAutoAdvance() {
   autoAdvanceTimer = setTimeout(() => {
     autoAdvanceTimer = null;
     logger.info("auto advance triggered", { phase: room.phase });
-    applyAndBroadcast({ type: "ADVANCE_PHASE" }, { source: "auto" });
+    applyAndBroadcast({ type: "ADVANCE_PHASE" }, { source: "auto" }).catch((error) => {
+      logger.error("auto advance failed", { error: error.message || String(error) });
+    });
   }, 700);
 }
 
@@ -244,7 +264,7 @@ async function handlePostAction(req, res) {
     const body = JSON.parse(rawBody || "{}");
     const playerId = typeof body.playerId === "string" ? body.playerId : null;
     const action = normalizeAction(body.action || {}, playerId);
-    const result = applyAndBroadcast(action, { connectionId: playerId || null });
+    const result = await applyAndBroadcast(action, { connectionId: playerId || null });
 
     logger.debug("action response sent", {
       type: action.type,

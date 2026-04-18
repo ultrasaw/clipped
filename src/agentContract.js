@@ -6,6 +6,13 @@
  * mutate game state directly; they return actions that the game controller
  * validates through applyAction/applyAndBroadcast.
  */
+const {
+  answerQuestion,
+  chooseVoteTarget,
+  createChatMessage,
+  createFinalStatement,
+  createTiebreakStatement,
+} = require("./questions");
 
 const AGENT_ACTION_TYPES = {
   SUBMIT_SPARK: "SUBMIT_SPARK",
@@ -44,43 +51,109 @@ class BaseAgent {
   /**
    * Return a SUBMIT_SPARK action or null.
    */
-  async getSparkAction(_context) {
-    return null;
+  async getSparkAction(context) {
+    if (!context?.game?.sparkPrompt) {
+      return null;
+    }
+
+    const text = await answerQuestion(
+      this.name,
+      this.personalityPrompt,
+      context.game.sparkPrompt,
+      this.gameplayPrompt,
+      {
+        phase: context.game.phase,
+        round: context.game.round,
+      },
+    );
+
+    return createSparkAction(this.id, text);
   }
 
   /**
    * Return zero or more SEND_CHAT actions.
    */
-  async getChatActions(_context) {
-    return [];
+  async getChatActions(context) {
+    const text = await createChatMessage(
+      this.name,
+      this.personalityPrompt,
+      this.gameplayPrompt,
+      context,
+    );
+
+    return text ? [createChatAction(this.id, text)] : [];
   }
 
   /**
    * Return a SUBMIT_FINAL action or null.
    */
-  async getFinalStatementAction(_context) {
-    return null;
+  async getFinalStatementAction(context) {
+    const text = await createFinalStatement(
+      this.name,
+      this.personalityPrompt,
+      this.gameplayPrompt,
+      context,
+    );
+
+    return text ? createFinalStatementAction(this.id, text) : null;
   }
 
   /**
    * Return a CAST_VOTE action or null.
    */
-  async getVoteAction(_context) {
-    return null;
+  async getVoteAction(context) {
+    if (!Array.isArray(context?.legalTargets) || context.legalTargets.length === 0) {
+      return null;
+    }
+
+    const targetId = await chooseVoteTarget(
+      this.name,
+      this.personalityPrompt,
+      this.gameplayPrompt,
+      context,
+    );
+
+    return targetId ? createVoteAction(this.id, targetId) : null;
   }
 
   /**
    * Return a SUBMIT_TIEBREAK action or null.
    */
-  async getTiebreakStatementAction(_context) {
-    return null;
+  async getTiebreakStatementAction(context) {
+    if (!Array.isArray(context?.tiedPlayerIds) || !context.tiedPlayerIds.includes(this.id)) {
+      return null;
+    }
+
+    const text = await createTiebreakStatement(
+      this.name,
+      this.personalityPrompt,
+      this.gameplayPrompt,
+      context,
+    );
+
+    return text ? createTiebreakStatementAction(this.id, text) : null;
   }
 
   /**
    * Return a CAST_TIEBREAK_VOTE action or null.
    */
-  async getTiebreakVoteAction(_context) {
-    return null;
+  async getTiebreakVoteAction(context) {
+    if (Array.isArray(context?.tiedPlayerIds) && context.tiedPlayerIds.includes(this.id)) {
+      return null;
+    }
+
+    if (!Array.isArray(context?.legalTargets) || context.legalTargets.length === 0) {
+      return null;
+    }
+
+    const targetId = await chooseVoteTarget(
+      this.name,
+      this.personalityPrompt,
+      this.gameplayPrompt,
+      context,
+    );
+
+    return targetId ? createTiebreakVoteAction(this.id, targetId) : null;
   }
 }
 
