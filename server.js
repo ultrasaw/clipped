@@ -62,6 +62,7 @@ function createRuntime(options) {
     phaseTimer: null,
     autoAdvanceTimer: null,
     lobbyStartTimer: null,
+    cleanupTimer: null,
     agentManager: null,
   };
 
@@ -155,6 +156,7 @@ async function applyAndBroadcast(runtime, action, context = {}) {
       clearPhaseTimer(runtime);
       clearScheduledAdvance(runtime);
       clearLobbyStartTimer(runtime);
+      clearCleanupTimer(runtime);
     }
 
     maybeScheduleLobbyStart(runtime, action);
@@ -182,6 +184,11 @@ function handlePhaseChanged(runtime, previousPhase) {
   runtime.agentManager.handlePhaseEntered(room);
   schedulePhaseTimer(runtime);
   maybeScheduleAutoAdvance(runtime);
+
+  if (room.phase === "game_over") {
+    scheduleRoomCleanup(runtime);
+  }
+
   broadcastState(runtime);
 }
 
@@ -228,6 +235,50 @@ function clearPhaseTimer(runtime) {
   if (runtime.phaseTimer) {
     clearTimeout(runtime.phaseTimer);
     runtime.phaseTimer = null;
+  }
+}
+
+const DEMO_RESET_DELAY_MS = 60_000;
+const ROOM_DELETE_DELAY_MS = 2 * 60_000;
+
+function scheduleRoomCleanup(runtime) {
+  const { room } = runtime;
+
+  if (runtime.cleanupTimer) {
+    clearTimeout(runtime.cleanupTimer);
+  }
+
+  const isDemo = room.id === "demo";
+  const delayMs = isDemo ? DEMO_RESET_DELAY_MS : ROOM_DELETE_DELAY_MS;
+
+  logger.info("room cleanup scheduled", {
+    room: room.id,
+    action: isDemo ? "reset" : "delete",
+    inMs: delayMs,
+  });
+
+  runtime.cleanupTimer = setTimeout(() => {
+    runtime.cleanupTimer = null;
+
+    if (isDemo) {
+      applyAndBroadcast(runtime, { type: "RESET_ROOM" }, { source: "auto-cleanup" }).catch((error) => {
+        logger.error("auto reset failed", { room: room.id, error: error.message || String(error) });
+      });
+    } else {
+      logger.info("auto-deleting finished room", { room: room.id });
+      for (const client of runtime.clients.values()) {
+        try { client.res.end(); } catch (_) {}
+      }
+      runtime.clients.clear();
+      roomStore.deleteRoom(room.id);
+    }
+  }, delayMs);
+}
+
+function clearCleanupTimer(runtime) {
+  if (runtime.cleanupTimer) {
+    clearTimeout(runtime.cleanupTimer);
+    runtime.cleanupTimer = null;
   }
 }
 

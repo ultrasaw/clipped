@@ -39,6 +39,10 @@ function createRoomStore({ createRuntime }) {
     return [...runtimes.values()];
   }
 
+  function deleteRoom(id) {
+    return runtimes.delete(id);
+  }
+
   function getClientCount() {
     return listRooms().reduce((total, runtime) => total + runtime.clients.size, 0);
   }
@@ -46,6 +50,7 @@ function createRoomStore({ createRuntime }) {
   return {
     createRoom,
     getRoom,
+    deleteRoom,
     listRooms,
     getClientCount,
   };
