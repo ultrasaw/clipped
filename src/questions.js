@@ -24,9 +24,9 @@ function extractOutputText(payload) {
     .join(" ");
 }
 
-async function createQuestion() {
+async function generateText(prompt) {
   if (!process.env.OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY is required to generate a question.");
+    throw new Error("OPENAI_API_KEY is required to generate text.");
   }
 
   const response = await fetch(OPENAI_API_URL, {
@@ -37,31 +37,7 @@ async function createQuestion() {
     },
     body: JSON.stringify({
       model: DEFAULT_MODEL,
-      input: [
-        {
-          role: "developer",
-          content: [
-            {
-              type: "input_text",
-              text: [
-                "You write spark prompts for a social deduction party game.",
-                "Return exactly one short prompt.",
-                "The prompt must be easy to answer instantly, sound natural in chat, and fit in 80 characters.",
-                "Avoid numbering, labels, quotes, or extra commentary.",
-              ].join(" "),
-            },
-          ],
-        },
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: "Create one new spark prompt for the next round.",
-            },
-          ],
-        },
-      ],
+      input: prompt,
     }),
   });
 
@@ -71,7 +47,37 @@ async function createQuestion() {
   }
 
   const payload = await response.json();
-  const question = normalizeQuestion(extractOutputText(payload));
+  return extractOutputText(payload);
+}
+
+async function createQuestion() {
+  const question = normalizeQuestion(
+    await generateText([
+      {
+        role: "developer",
+        content: [
+          {
+            type: "input_text",
+            text: [
+              "You write spark prompts for a social deduction party game.",
+              "Return exactly one short prompt.",
+              "The prompt must be easy to answer instantly, sound natural in chat, and fit in 80 characters.",
+              "Avoid numbering, labels, quotes, or extra commentary.",
+            ].join(" "),
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: "Create one new spark prompt for the next round.",
+          },
+        ],
+      },
+    ]),
+  );
 
   if (!question) {
     throw new Error("OpenAI returned an empty question.");
@@ -80,6 +86,48 @@ async function createQuestion() {
   return question;
 }
 
+async function answerQuestion(name, personality, question) {
+  const answer = normalizeQuestion(
+    await generateText([
+      {
+        role: "developer",
+        content: [
+          {
+            type: "input_text",
+            text: [
+              "You are writing a short answer in a social deduction chat game.",
+              "Stay in character using the provided personality.",
+              "Write like a human player, not an assistant.",
+              "Return exactly one concise answer with no preamble, labels, or quotation marks.",
+              "Keep it natural and under 80 characters when possible.",
+            ].join(" "),
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: [
+              `Name: ${String(name || "").trim() || "Player"}`,
+              `Personality: ${String(personality || "").trim() || "neutral"}`,
+              `Question: ${String(question || "").trim()}`,
+            ].join("\n"),
+          },
+        ],
+      },
+    ]),
+  );
+
+  if (!answer) {
+    throw new Error("OpenAI returned an empty answer.");
+  }
+
+  return answer;
+}
+
 module.exports = {
+  answerQuestion,
   createQuestion,
 };
