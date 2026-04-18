@@ -337,12 +337,19 @@ body[data-screen="game"] .game-card {
     rgba(24, 22, 18, 0.5);
 }
 
-.lobby-copy h3,
-.results-screen h3 {
+.lobby-copy h3 {
   margin: 0;
   font-size: clamp(2rem, 5vw, 4rem);
   line-height: 0.95;
   letter-spacing: -0.06em;
+}
+
+.results-screen h3 {
+  margin: 0;
+  font-size: clamp(2.2rem, 5.5vw, 4.8rem);
+  line-height: 0.92;
+  letter-spacing: -0.06em;
+  transition: color 400ms ease;
 }
 
 #lobbyDescription,
@@ -412,24 +419,140 @@ body[data-screen="game"] .game-card {
 }
 
 .results-screen {
-  display: grid;
-  gap: 1rem;
-  align-content: center;
-  padding: clamp(1.25rem, 4vw, 2rem);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1.5rem;
+  padding: clamp(1.5rem, 4vw, 2.5rem);
+  overflow-y: auto;
+  transition: background 400ms ease;
 }
+
+/* ── Outcome hero ──────────────────────────────────────────────────────── */
+
+.outcome-hero {
+  display: grid;
+  gap: 0.4rem;
+}
+
+body[data-result="ai-full"] .results-screen {
+  background: radial-gradient(ellipse at 50% 0%, rgba(196, 64, 53, 0.14), transparent 60%);
+}
+
+body[data-result="ai-full"] #resultsTitle {
+  color: var(--red);
+}
+
+body[data-result="ai-full"] #resultsEyebrow {
+  color: var(--red);
+}
+
+body[data-result="humans-full"] .results-screen {
+  background: radial-gradient(ellipse at 50% 0%, rgba(45, 184, 122, 0.12), transparent 60%);
+}
+
+body[data-result="humans-full"] #resultsTitle {
+  color: var(--green);
+}
+
+body[data-result="humans-full"] #resultsEyebrow {
+  color: var(--green);
+}
+
+body[data-result="humans-partial"] .results-screen {
+  background: radial-gradient(ellipse at 50% 0%, rgba(212, 137, 42, 0.12), transparent 60%);
+}
+
+body[data-result="humans-partial"] #resultsTitle {
+  color: var(--amber);
+}
+
+body[data-result="humans-partial"] #resultsEyebrow {
+  color: var(--amber);
+}
+
+/* ── Result player lists ───────────────────────────────────────────────── */
 
 .results-details {
-  border: 1px solid var(--line);
-  border-radius: 1.2rem;
-  padding: 1rem;
-  background: rgba(28, 25, 20, 0.55);
+  flex-shrink: 0;
 }
 
-.results-details ol {
+.result-lists {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+}
+
+.result-list {
+  flex: 1;
+  min-width: 10rem;
+}
+
+.result-players {
   display: grid;
   gap: 0.45rem;
-  margin: 0.75rem 0 0;
-  padding-left: 1.25rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.result-player {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+  background: rgba(28, 25, 20, 0.55);
+  font-family: "Trebuchet MS", Verdana, sans-serif;
+  font-size: 0.85rem;
+}
+
+.result-player-name {
+  font-weight: 700;
+  color: var(--ink);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.result-player--ejected .result-player-name {
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+
+.result-player--none {
+  color: var(--muted);
+  font-style: italic;
+  justify-content: flex-start;
+  background: transparent;
+  border-color: transparent;
+}
+
+.result-player-role {
+  flex-shrink: 0;
+  font-size: 0.63rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
+  white-space: nowrap;
+}
+
+.result-player-role[data-role="human"] {
+  color: var(--green);
+  background: rgba(45, 184, 122, 0.1);
+  border-color: rgba(45, 184, 122, 0.22);
+}
+
+.result-player-role[data-role="ai"] {
+  color: var(--accent);
+  background: rgba(224, 107, 69, 0.1);
+  border-color: rgba(224, 107, 69, 0.22);
 }
 
 .results-actions {
@@ -462,6 +585,36 @@ body[data-screen="game"] .game-card {
   gap: 1rem;
   padding: 1rem 1.25rem;
   border-bottom: 1px solid var(--line);
+}
+
+.game-header-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.leave-link {
+  align-self: start;
+  padding: 0.32rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: transparent;
+  font-family: "Trebuchet MS", Verdana, sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-decoration: none;
+  letter-spacing: 0.02em;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease,
+    background 150ms ease;
+}
+
+.leave-link:hover {
+  color: var(--ink);
+  border-color: rgba(255, 220, 170, 0.22);
+  background: rgba(40, 36, 29, 0.85);
 }
 
 .phase-meta {

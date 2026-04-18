@@ -236,11 +236,18 @@ function renderState() {
   const viewer = state.viewer;
   const label = phaseLabels[state.phase] || state.phase;
 
-  document.body.dataset.screen = getScreen();
+  const screen = getScreen();
+  document.body.dataset.screen = screen;
   document.body.dataset.phase = state.phase;
-  document.documentElement.dataset.screen = getScreen();
+  document.documentElement.dataset.screen = screen;
   document.documentElement.dataset.phase = state.phase;
-  renderScreens();
+
+  if (state.result) {
+    document.body.dataset.result = `${state.result.winner}-${state.result.level}`;
+  } else {
+    delete document.body.dataset.result;
+  }
+  renderScreens(screen);
   roomLabel.textContent = state.name || "Room";
   phaseTitle.textContent = `${label}${state.round ? ` / Round ${state.round}` : ""}`;
   phaseMeta.textContent = state.result
@@ -274,8 +281,7 @@ function getScreen() {
   return "game";
 }
 
-function renderScreens() {
-  const screen = getScreen();
+function renderScreens(screen = getScreen()) {
 
   lobbyScreen.classList.toggle("hidden", screen !== "lobby");
   gameScreen.classList.toggle("hidden", screen !== "game");
@@ -337,28 +343,53 @@ function renderLobbyCountdown() {
 
 function renderResults() {
   const result = state.result;
+  const resultsEyebrow = document.querySelector("#resultsEyebrow");
 
-  resultsTitle.textContent = result ? result.summary : "Game over";
-  resultsSummary.textContent = result
-    ? `${result.winner.toUpperCase()} result / ${result.level} outcome`
-    : "The room has decided.";
+  const outcomeMap = {
+    "ai-full":        { eyebrow: "AI Wins",         headline: "The AI won.",           sub: "Both humans were identified and ejected." },
+    "humans-full":    { eyebrow: "Humans Win",       headline: "Both humans survived.", sub: "The AI couldn't fool the room." },
+    "humans-partial": { eyebrow: "Partial Win",      headline: "One human survived.",   sub: "The room couldn't get them all." },
+  };
 
-  const ejectedPlayers = state.players.filter((player) => player.status === "ejected");
+  const key = result ? `${result.winner}-${result.level}` : null;
+  const outcome = outcomeMap[key] || { eyebrow: "Game Over", headline: result?.summary || "The room has decided.", sub: "" };
+
+  if (resultsEyebrow) resultsEyebrow.textContent = outcome.eyebrow;
+  resultsTitle.textContent = outcome.headline;
+  resultsSummary.textContent = outcome.sub;
+
+  const ejected = state.players.filter((p) => p.status === "ejected");
+  const survivors = state.players.filter((p) => p.status === "alive" && p.revealedRole);
+
+  const playerRow = (p) => {
+    const role = (p.revealedRole || p.status).toLowerCase();
+    const label = p.revealedRole || p.status;
+    return `
+      <li class="result-player result-player--${p.status}">
+        <span class="result-player-name">${escapeHtml(p.name)}${p.isYou ? " <em>(you)</em>" : ""}</span>
+        <span class="result-player-role" data-role="${escapeHtml(role)}">${escapeHtml(label)}</span>
+      </li>`;
+  };
+
+  const ejectedHtml = ejected.length
+    ? ejected.map(playerRow).join("")
+    : `<li class="result-player result-player--none">No one was eliminated</li>`;
+
+  const survivorsSection = survivors.length
+    ? `<div class="result-list">
+        <p class="eyebrow">Survived</p>
+        <ul class="result-players">${survivors.map(playerRow).join("")}</ul>
+      </div>`
+    : "";
 
   resultsDetails.innerHTML = `
-    <p class="eyebrow">Eliminations</p>
-    ${
-      ejectedPlayers.length
-        ? `<ol>${ejectedPlayers
-            .map(
-              (player) =>
-                `<li><strong>${escapeHtml(player.name)}</strong> revealed as ${escapeHtml(
-                  player.revealedRole || "unknown",
-                )}</li>`,
-            )
-            .join("")}</ol>`
-        : "<p>No players were ejected.</p>"
-    }
+    <div class="result-lists">
+      <div class="result-list">
+        <p class="eyebrow">Eliminated</p>
+        <ul class="result-players">${ejectedHtml}</ul>
+      </div>
+      ${survivorsSection}
+    </div>
   `;
 }
 

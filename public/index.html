@@ -74,7 +74,10 @@
             <h2 id="phaseTitle">Connecting</h2>
             <p id="phaseMeta" class="phase-meta">Waiting for state...</p>
           </div>
-          <span id="connectionStatus" class="status">Connecting</span>
+          <div class="game-header-actions">
+            <a href="/" class="leave-link" title="Leave game">← Leave</a>
+            <span id="connectionStatus" class="status">Connecting</span>
+          </div>
         </header>
 
         <section id="lobbyScreen" class="screen lobby-screen" aria-label="Lobby">
@@ -144,12 +147,15 @@
         </section>
 
         <section id="resultsScreen" class="screen results-screen hidden" aria-label="Results">
-          <p class="eyebrow">Results</p>
-          <h3 id="resultsTitle">Game over</h3>
-          <p id="resultsSummary">The room has decided.</p>
+          <div class="outcome-hero">
+            <p id="resultsEyebrow" class="eyebrow">Results</p>
+            <h3 id="resultsTitle">Game over</h3>
+            <p id="resultsSummary">The room has decided.</p>
+          </div>
           <div id="resultsDetails" class="results-details"></div>
           <div class="results-actions">
-            <a class="secondary-link" href="/debug/events">Open event log</a>
+            <a class="secondary-link" href="/">← Back to rooms</a>
+            <a class="secondary-link" href="/debug/events">Event log</a>
             <button id="resultsResetButton" type="button" class="ghost dev-only">Reset Room</button>
           </div>
         </section>
