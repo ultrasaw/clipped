@@ -32,58 +32,82 @@
           <span id="connectionStatus" class="status">Connecting</span>
         </header>
 
-        <section class="controls" aria-label="Lobby controls">
-          <form id="joinForm" class="join-form">
-            <label class="field">
-              <span>Name</span>
-              <input
-                id="nameInput"
-                name="name"
-                maxlength="24"
-                placeholder="Player name"
-                autocomplete="nickname"
-                required
-              />
-            </label>
-            <button type="submit">Join</button>
-          </form>
-
-          <div class="dev-controls">
-            <button id="startButton" type="button">Start</button>
-            <button id="advanceButton" type="button" class="secondary dev-only">Advance</button>
-            <button id="resetButton" type="button" class="ghost dev-only">Reset</button>
+        <section id="lobbyScreen" class="screen lobby-screen" aria-label="Lobby">
+          <div class="lobby-copy">
+            <p class="eyebrow">Pregame</p>
+            <h3 id="lobbyTitle">Join the demo room</h3>
+            <p id="lobbyDescription">
+              Two humans are needed. Once both join, the game starts automatically after a short countdown.
+            </p>
+            <div id="lobbyCountdown" class="lobby-countdown hidden" aria-live="polite"></div>
           </div>
-        </section>
 
-        <section class="room-layout">
-          <aside class="players-panel" aria-label="Players">
-            <div class="panel-heading">
-              <p class="eyebrow">Players</p>
-              <span id="playerCount">0</span>
+          <section class="controls" aria-label="Lobby controls">
+            <form id="joinForm" class="join-form">
+              <label class="field">
+                <span>Name</span>
+                <input
+                  id="nameInput"
+                  name="name"
+                  maxlength="24"
+                  placeholder="Player name"
+                  autocomplete="nickname"
+                  required
+                />
+              </label>
+              <button type="submit">Join</button>
+            </form>
+
+            <div class="dev-controls">
+              <button id="advanceButton" type="button" class="secondary dev-only">Advance</button>
+              <button id="resetButton" type="button" class="ghost dev-only">Reset</button>
             </div>
-            <ol id="players" class="players"></ol>
-          </aside>
-
-          <section class="main-panel">
-            <section id="sparkPanel" class="spark-panel hidden" aria-label="Spark prompt"></section>
-            <ol id="messages" class="messages" aria-live="polite"></ol>
-            <section id="votePanel" class="vote-panel hidden" aria-label="Vote"></section>
           </section>
         </section>
 
-        <form id="actionForm" class="composer">
-          <label class="field message-field">
-            <span id="actionLabel">Message</span>
-            <input
-              id="actionInput"
-              name="message"
-              maxlength="500"
-              placeholder="Join and start the game..."
-              autocomplete="off"
-            />
-          </label>
-          <button id="sendButton" type="submit">Send</button>
-        </form>
+        <section id="gameScreen" class="screen game-screen hidden" aria-label="Active game">
+          <section class="room-layout">
+            <aside class="players-panel" aria-label="Players">
+              <div class="panel-heading">
+                <p class="eyebrow">Players</p>
+                <span id="playerCount">0</span>
+              </div>
+              <ol id="players" class="players"></ol>
+            </aside>
+
+            <section class="main-panel">
+              <section id="phasePanel" class="phase-panel" aria-label="Current phase"></section>
+              <section id="sparkPanel" class="spark-panel hidden" aria-label="Spark prompt"></section>
+              <ol id="messages" class="messages" aria-live="polite"></ol>
+              <section id="votePanel" class="vote-panel hidden" aria-label="Vote"></section>
+            </section>
+          </section>
+
+          <form id="actionForm" class="composer">
+            <label class="field message-field">
+              <span id="actionLabel">Message</span>
+              <input
+                id="actionInput"
+                name="message"
+                maxlength="500"
+                placeholder="Join and start the game..."
+                autocomplete="off"
+              />
+            </label>
+            <button id="sendButton" type="submit">Send</button>
+          </form>
+        </section>
+
+        <section id="resultsScreen" class="screen results-screen hidden" aria-label="Results">
+          <p class="eyebrow">Results</p>
+          <h3 id="resultsTitle">Game over</h3>
+          <p id="resultsSummary">The room has decided.</p>
+          <div id="resultsDetails" class="results-details"></div>
+          <div class="results-actions">
+            <a class="secondary-link" href="/debug/events">Open event log</a>
+            <button id="resultsResetButton" type="button" class="ghost dev-only">Reset Room</button>
+          </div>
+        </section>
       </section>
     </main>
 
