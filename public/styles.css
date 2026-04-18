@@ -815,7 +815,7 @@ body[data-result="humans-partial"] #resultsEyebrow {
 
 .main-panel {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   min-height: 0;
   overflow: hidden;
 }
@@ -978,6 +978,112 @@ body[data-result="humans-partial"] #resultsEyebrow {
   line-height: 1.25;
   color: var(--ink);
 }
+
+/* ── Vote reveal panel ──────────────────────────────────────────────────── */
+
+.vote-reveal-panel {
+  display: grid;
+  gap: 0.45rem;
+  border-bottom: 1px solid var(--line);
+  padding: 0.6rem 1.25rem;
+  background:
+    radial-gradient(circle at 100% 50%, rgba(196, 64, 53, 0.07), transparent 14rem),
+    rgba(30, 24, 18, 0.88);
+}
+
+.vote-reveal-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.vote-reveal-row .eyebrow {
+  margin: 0;
+  flex-shrink: 0;
+  min-width: 2.2rem;
+  color: var(--muted);
+}
+
+.vote-tally {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.vote-tally-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.18rem 0.55rem;
+  background: rgba(36, 30, 22, 0.8);
+  color: var(--ink);
+  font-family: "Trebuchet MS", Verdana, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.vote-tally-chip--ejected {
+  border-color: rgba(196, 64, 53, 0.4);
+  background: rgba(196, 64, 53, 0.12);
+  color: var(--red);
+}
+
+.vote-tally-dots {
+  color: var(--accent);
+  font-size: 0.5rem;
+  letter-spacing: 0.06em;
+  opacity: 0.8;
+}
+
+.vote-tally-chip strong {
+  color: var(--amber);
+  font-size: 0.8rem;
+}
+
+.vote-tally-chip--ejected .vote-tally-dots {
+  color: var(--red);
+}
+
+.vote-tally-chip--ejected strong {
+  color: var(--red);
+}
+
+.vote-casts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.65rem;
+  align-items: center;
+}
+
+.vote-cast {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-family: "Trebuchet MS", Verdana, sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.vote-cast--decisive {
+  color: var(--ink);
+}
+
+.vote-cast-arrow {
+  color: rgba(224, 107, 69, 0.45);
+  font-size: 0.6rem;
+}
+
+.vote-cast--decisive .vote-cast-arrow {
+  color: var(--red);
+  opacity: 0.7;
+}
+
+/* ── Hidden ──────────────────────────────────────────────────────────────── */
 
 .hidden {
   display: none;

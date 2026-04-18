@@ -27,6 +27,7 @@ const playersEl = document.querySelector("#players");
 const playerCount = document.querySelector("#playerCount");
 const phasePanel = document.querySelector("#phasePanel");
 const sparkPanel = document.querySelector("#sparkPanel");
+const voteRevealPanel = document.querySelector("#voteRevealPanel");
 const votePanel = document.querySelector("#votePanel");
 const messagesEl = document.querySelector("#messages");
 const actionForm = document.querySelector("#actionForm");
@@ -263,6 +264,7 @@ function renderState() {
   renderPlayers();
   renderPhasePanel();
   renderSpark();
+  renderVoteReveal();
   renderMessages();
   renderVote();
   renderActionForm();
@@ -523,6 +525,73 @@ function renderMessages() {
   }
 
   messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function renderVoteReveal() {
+  const showPhases = ["reveal", "game_over", "tiebreak_statements", "tiebreak_vote"];
+  const votes = state.revealedVotes;
+  const hasVotes = votes && Object.keys(votes).length > 0;
+
+  if (!showPhases.includes(state.phase) || !hasVotes) {
+    voteRevealPanel.classList.add("hidden");
+    voteRevealPanel.innerHTML = "";
+    return;
+  }
+
+  // Count votes received per target player
+  const counts = {};
+  for (const targetId of Object.values(votes)) {
+    counts[targetId] = (counts[targetId] || 0) + 1;
+  }
+
+  // Determine ejected player id(s) for highlighting
+  const ejectedIds = new Set(
+    state.lastEjection
+      ? state.lastEjection.playerIds || (state.lastEjection.playerId ? [state.lastEjection.playerId] : [])
+      : [],
+  );
+
+  // Sort targets highest → lowest votes
+  const sortedTargets = Object.entries(counts)
+    .sort(([, a], [, b]) => b - a)
+    .map(([id, count]) => ({ id, count, player: state.players.find((p) => p.id === id) }));
+
+  const tallyHtml = sortedTargets
+    .map(({ id, count, player }) => {
+      const name = player ? player.name : "?";
+      const ejected = ejectedIds.has(id);
+      return `<span class="vote-tally-chip${ejected ? " vote-tally-chip--ejected" : ""}">
+        ${escapeHtml(name)}
+        <span class="vote-tally-dots">${"▪".repeat(count)}</span>
+        <strong>${count}</strong>
+      </span>`;
+    })
+    .join("");
+
+  const castHtml = Object.entries(votes)
+    .map(([voterId, targetId]) => {
+      const voter = state.players.find((p) => p.id === voterId);
+      const target = state.players.find((p) => p.id === targetId);
+      const isForEjected = ejectedIds.has(targetId);
+      return `<span class="vote-cast${isForEjected ? " vote-cast--decisive" : ""}">
+        ${escapeHtml(voter ? voter.name : "?")}
+        <span class="vote-cast-arrow">→</span>
+        ${escapeHtml(target ? target.name : "?")}
+      </span>`;
+    })
+    .join("");
+
+  voteRevealPanel.classList.remove("hidden");
+  voteRevealPanel.innerHTML = `
+    <div class="vote-reveal-row">
+      <p class="eyebrow">Tally</p>
+      <div class="vote-tally">${tallyHtml}</div>
+    </div>
+    <div class="vote-reveal-row">
+      <p class="eyebrow">Cast</p>
+      <div class="vote-casts">${castHtml}</div>
+    </div>
+  `;
 }
 
 function renderVote() {
