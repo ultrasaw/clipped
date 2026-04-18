@@ -22,6 +22,7 @@ const GAME_CONFIG = {
     chatMessage: 500,
     finalStatement: 240,
     maxStoredMessages: 200,
+    maxStoredEvents: 500,
   },
 };
 

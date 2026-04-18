@@ -50,7 +50,22 @@ function createDemoRoom() {
     phaseStartedAt: null,
     phaseEndsAt: null,
     errors: [],
+    events: [],
   };
+}
+
+function addRoomEvent(room, type, payload = {}) {
+  room.events.push({
+    at: Date.now(),
+    type,
+    round: room.round,
+    phase: room.phase,
+    ...payload,
+  });
+
+  if (room.events.length > GAME_CONFIG.textLimits.maxStoredEvents) {
+    room.events.shift();
+  }
 }
 
 function createHumanPlayer(name, connectionId = null) {
@@ -106,11 +121,19 @@ function pickSparkPrompt() {
 }
 
 function enterPhase(room, nextPhase) {
+  const previousPhase = room.phase;
+
   room.phase = nextPhase;
   room.phaseStartedAt = Date.now();
   room.phaseEndsAt = GAME_CONFIG.phaseDurations[nextPhase]
     ? room.phaseStartedAt + GAME_CONFIG.phaseDurations[nextPhase]
     : null;
+
+  addRoomEvent(room, "PHASE_CHANGED", {
+    from: previousPhase,
+    to: nextPhase,
+    phaseEndsAt: room.phaseEndsAt,
+  });
 
   if (nextPhase === "spark") {
     room.round += 1;
@@ -162,6 +185,11 @@ function startGame(room) {
   room.revealedRoles = {};
   room.result = null;
   addSystemMessage(room, "The room fills with six voices. Two are human.");
+  addRoomEvent(room, "GAME_STARTED", {
+    humansRequired: GAME_CONFIG.players.humansRequired,
+    aiCount: GAME_CONFIG.players.aiCount,
+    playerCount: room.players.length,
+  });
   enterPhase(room, "spark");
 
   return { ok: true };
@@ -320,6 +348,10 @@ function resolveVote(room) {
     room.lastEjection = null;
     room.revealedVotes = {};
     addSystemMessage(room, "No votes were cast, so no one was ejected.");
+    addRoomEvent(room, "VOTE_RESOLVED", {
+      outcome: "no_votes",
+      votes: {},
+    });
     return;
   }
 
@@ -353,6 +385,12 @@ function resolveVote(room) {
   };
 
   addSystemMessage(room, `${ejected.name} was ejected and revealed as ${ejected.role.toUpperCase()}.`);
+  addRoomEvent(room, "PLAYER_EJECTED", {
+    playerId: ejected.id,
+    playerName: ejected.name,
+    revealedRole: ejected.role.toUpperCase(),
+    votes: { ...room.votes },
+  });
 }
 
 function isGameOver(room) {
@@ -370,6 +408,7 @@ function resolveGame(room) {
       level: "full",
       summary: "Full human win: both humans survived.",
     };
+    addRoomEvent(room, "GAME_OVER", room.result);
     return;
   }
 
@@ -379,6 +418,7 @@ function resolveGame(room) {
       level: "partial",
       summary: "Partial human win: one human survived.",
     };
+    addRoomEvent(room, "GAME_OVER", room.result);
     return;
   }
 
@@ -387,6 +427,7 @@ function resolveGame(room) {
     level: "full",
     summary: "AI win: both humans were ejected.",
   };
+  addRoomEvent(room, "GAME_OVER", room.result);
 }
 
 function joinRoom(room, action, context) {
@@ -405,6 +446,10 @@ function joinRoom(room, action, context) {
   if (existing && existing.role === "human") {
     existing.name = name;
     existing.connectionId = context.connectionId || existing.connectionId;
+    addRoomEvent(room, "PLAYER_REJOINED", {
+      playerId: existing.id,
+      playerName: existing.name,
+    });
     return { ok: true, playerId: existing.id };
   }
 
@@ -418,6 +463,10 @@ function joinRoom(room, action, context) {
   const player = createHumanPlayer(name, context.connectionId);
   room.players.push(player);
   addSystemMessage(room, `${player.name} joined the lobby.`);
+  addRoomEvent(room, "PLAYER_JOINED", {
+    playerId: player.id,
+    playerName: player.name,
+  });
 
   return { ok: true, playerId: player.id };
 }
@@ -430,6 +479,7 @@ function resetRoom(room) {
   }
 
   Object.assign(room, freshRoom);
+  addRoomEvent(room, "ROOM_RESET");
 
   return { ok: true };
 }
@@ -474,4 +524,5 @@ module.exports = {
   createDemoRoom,
   applyAction,
   advancePhase,
+  addRoomEvent,
 };

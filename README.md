@@ -113,6 +113,50 @@ The client and agents both submit game actions:
 
 The game controller validates every action before mutating room state.
 
+## Operational Endpoints
+
+These endpoints help with deployment and playtest debugging.
+
+### `GET /health`
+
+Returns a compact server status payload without hidden role information.
+
+Example:
+
+```json
+{
+  "ok": true,
+  "phase": "chat",
+  "round": 1,
+  "maxRounds": 3,
+  "players": 6,
+  "alivePlayers": 6,
+  "clients": 2,
+  "messages": 12,
+  "events": 24,
+  "uptimeSeconds": 123
+}
+```
+
+### `GET /debug/events`
+
+Returns the current room's structured event log.
+
+This is intended for development and playtest debugging. It records accepted and
+rejected actions, phase changes, joins, ejections, game start, game over, and
+room resets.
+
+Example:
+
+```json
+{
+  "roomId": "demo",
+  "phase": "spark",
+  "round": 1,
+  "events": []
+}
+```
+
 ## Prototype Flow
 
 ```text

@@ -3,7 +3,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { createDemoRoom, applyAction } = require("./src/game");
+const { createDemoRoom, applyAction, addRoomEvent } = require("./src/game");
 const { createMockAgentManager } = require("./src/agents");
 const { getPublicState } = require("./src/publicState");
 const logger = require("./src/logger");
@@ -84,12 +84,25 @@ function applyAndBroadcast(action, context = {}) {
 
   if (!result.ok) {
     room.errors.push(result.error);
+    addRoomEvent(room, "ACTION_REJECTED", {
+      source: context.source || "client",
+      actionType: action.type,
+      actorId: action.playerId || action.voterId || null,
+      targetId: action.targetId || null,
+      error: result.error,
+    });
     logger.warn("action rejected", {
       type: action.type,
       actor: describeActor(room, action.playerId || action.voterId),
       error: result.error,
     });
   } else {
+    addRoomEvent(room, "ACTION_ACCEPTED", {
+      source: context.source || "client",
+      actionType: action.type,
+      actorId: action.playerId || action.voterId || result.playerId || null,
+      targetId: action.targetId || null,
+    });
     logger.info("action accepted", {
       type: action.type,
       actor: describeActor(room, action.playerId || action.voterId || result.playerId),
@@ -283,6 +296,30 @@ function handleGetState(req, res, url) {
   sendJson(res, 200, getPublicState(room, playerId));
 }
 
+function handleHealth(req, res) {
+  sendJson(res, 200, {
+    ok: true,
+    phase: room.phase,
+    round: room.round,
+    maxRounds: room.maxRounds,
+    players: room.players.length,
+    alivePlayers: room.players.filter((player) => player.status === "alive").length,
+    clients: clients.size,
+    messages: room.messages.length,
+    events: room.events.length,
+    uptimeSeconds: Math.floor(process.uptime()),
+  });
+}
+
+function handleDebugEvents(req, res) {
+  sendJson(res, 200, {
+    roomId: room.id,
+    phase: room.phase,
+    round: room.round,
+    events: room.events,
+  });
+}
+
 function serveStatic(req, res) {
   const requestedPath = req.url === "/" ? "/index.html" : req.url;
   const safePath = path.normalize(decodeURIComponent(requestedPath)).replace(/^(\.\.[/\\])+/, "");
@@ -327,6 +364,16 @@ const server = http.createServer((req, res) => {
 
   if (req.method === "GET" && url.pathname === "/state") {
     handleGetState(req, res, url);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/health") {
+    handleHealth(req, res);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/debug/events") {
+    handleDebugEvents(req, res);
     return;
   }
 
