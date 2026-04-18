@@ -122,7 +122,16 @@ lobby
 -> next round or game_over
 ```
 
-Use the `Advance` button to move between phases while testing.
+Normal players do not need to advance phases manually. The server advances when
+all required submissions are in, and timed phases advance when their timer ends.
+
+To show debug controls such as `Advance` and `Reset`, open:
+
+```text
+http://localhost:3000?dev=1
+```
+
+Use this during development if a playtest gets stuck or you want to skip ahead.
 
 ## Server Logs
 

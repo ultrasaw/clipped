@@ -20,8 +20,10 @@ const sendButton = document.querySelector("#sendButton");
 let state = null;
 let events = null;
 let playerId = localStorage.getItem("clipped:playerId");
+const isDevMode = new URLSearchParams(window.location.search).get("dev") === "1";
 
 nameInput.value = localStorage.getItem("clipped:name") || "";
+document.body.classList.toggle("dev-mode", isDevMode);
 
 const phaseLabels = {
   lobby: "Lobby",
@@ -117,7 +119,7 @@ function renderState() {
     ? state.result.summary
     : state.phaseEndsAt
       ? `Phase ends around ${formatTime(state.phaseEndsAt)}`
-      : "Manual phase control for this prototype.";
+      : "Waiting for players.";
 
   viewerBriefing.textContent = viewer
     ? viewer.briefing || `You are ${viewer.name}.`
@@ -217,16 +219,17 @@ function renderVote() {
   const targets = state.players.filter((player) => {
     return player.status === "alive" && player.id !== state.viewer.id;
   });
+  const hasVoted = state.viewer.submissions.vote;
 
   votePanel.classList.remove("hidden");
   votePanel.innerHTML = `
     <p class="eyebrow">Vote</p>
-    <h3>Who feels least convincingly human?</h3>
+    <h3>${hasVoted ? "Vote submitted. Waiting for the room..." : "Who feels least convincingly human?"}</h3>
     <div class="vote-grid">
       ${targets
         .map(
           (player) => `
-            <button class="vote-card" data-target-id="${player.id}" type="button">
+            <button class="vote-card" data-target-id="${player.id}" type="button" ${hasVoted ? "disabled" : ""}>
               ${escapeHtml(player.name)}
             </button>
           `,
@@ -238,13 +241,17 @@ function renderVote() {
 
 function renderActionForm() {
   const config = actionForPhase(state.phase);
-  const canAct = Boolean(state.viewer && config.enabled);
+  const alreadySubmitted =
+    state.viewer &&
+    ((state.phase === "spark" && state.viewer.submissions.spark) ||
+      (state.phase === "final_statements" && state.viewer.submissions.finalStatement));
+  const canAct = Boolean(state.viewer && config.enabled && !alreadySubmitted);
 
   actionLabel.textContent = config.label;
-  actionInput.placeholder = config.placeholder;
+  actionInput.placeholder = alreadySubmitted ? "Submitted. Waiting for the room..." : config.placeholder;
   actionInput.disabled = !canAct;
   sendButton.disabled = !canAct;
-  sendButton.textContent = config.button;
+  sendButton.textContent = alreadySubmitted ? "Waiting" : config.button;
 }
 
 async function postAction(action) {

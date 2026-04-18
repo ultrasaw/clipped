@@ -14,6 +14,8 @@ const PUBLIC_DIR = path.join(__dirname, "public");
 
 const clients = new Map();
 const room = createDemoRoom();
+let phaseTimer = null;
+let autoAdvanceTimer = null;
 
 function sendJson(res, statusCode, payload) {
   const body = JSON.stringify(payload);
@@ -99,19 +101,80 @@ function applyAndBroadcast(action, context = {}) {
   broadcastState();
 
   if (result.ok && room.phase !== previousPhase) {
-    logger.info("phase changed", {
-      from: previousPhase,
-      to: room.phase,
-      round: room.round,
-      waitingFor: describeWaitingFor(room),
-    });
-    agentManager.handlePhaseEntered(room);
-    broadcastState();
+    handlePhaseChanged(previousPhase);
   } else if (result.ok) {
     logger.info("waiting", { for: describeWaitingFor(room) });
+    maybeScheduleAutoAdvance();
   }
 
   return result;
+}
+
+function handlePhaseChanged(previousPhase) {
+  clearScheduledAdvance();
+  logger.info("phase changed", {
+    from: previousPhase,
+    to: room.phase,
+    round: room.round,
+    waitingFor: describeWaitingFor(room),
+  });
+  agentManager.handlePhaseEntered(room);
+  schedulePhaseTimer();
+  maybeScheduleAutoAdvance();
+  broadcastState();
+}
+
+function schedulePhaseTimer() {
+  clearPhaseTimer();
+
+  if (!room.phaseEndsAt) {
+    return;
+  }
+
+  const delayMs = Math.max(room.phaseEndsAt - Date.now(), 0);
+
+  logger.info("phase timer scheduled", {
+    phase: room.phase,
+    inMs: delayMs,
+  });
+
+  phaseTimer = setTimeout(() => {
+    phaseTimer = null;
+    logger.info("phase timer elapsed", { phase: room.phase, waitingFor: describeWaitingFor(room) });
+    applyAndBroadcast({ type: "ADVANCE_PHASE" }, { source: "timer" });
+  }, delayMs);
+}
+
+function clearPhaseTimer() {
+  if (phaseTimer) {
+    clearTimeout(phaseTimer);
+    phaseTimer = null;
+  }
+}
+
+function maybeScheduleAutoAdvance() {
+  if (autoAdvanceTimer || !shouldAutoAdvance(room)) {
+    return;
+  }
+
+  logger.info("auto advance scheduled", {
+    phase: room.phase,
+    reason: describeWaitingFor(room),
+    inMs: 700,
+  });
+
+  autoAdvanceTimer = setTimeout(() => {
+    autoAdvanceTimer = null;
+    logger.info("auto advance triggered", { phase: room.phase });
+    applyAndBroadcast({ type: "ADVANCE_PHASE" }, { source: "auto" });
+  }, 700);
+}
+
+function clearScheduledAdvance() {
+  if (autoAdvanceTimer) {
+    clearTimeout(autoAdvanceTimer);
+    autoAdvanceTimer = null;
+  }
 }
 
 function handleEvents(req, res, url) {
@@ -359,6 +422,28 @@ function describeWaitingFor(currentRoom) {
   }
 
   return "unknown";
+}
+
+function shouldAutoAdvance(currentRoom) {
+  const alivePlayers = currentRoom.players.filter((player) => player.status === "alive");
+
+  if (!alivePlayers.length) {
+    return false;
+  }
+
+  if (currentRoom.phase === "spark") {
+    return alivePlayers.every((player) => Boolean(currentRoom.sparkAnswers[player.id]));
+  }
+
+  if (currentRoom.phase === "final_statements") {
+    return alivePlayers.every((player) => Boolean(currentRoom.finalStatements[player.id]));
+  }
+
+  if (currentRoom.phase === "vote") {
+    return alivePlayers.every((player) => Boolean(currentRoom.votes[player.id]));
+  }
+
+  return false;
 }
 
 function getLocalNetworkUrls(port) {

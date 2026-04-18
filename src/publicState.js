@@ -25,6 +25,11 @@ function getPublicState(room, viewerPlayerId = null) {
             viewer.role === "human"
               ? "You are human. There is one other human in the room. Find them and survive together."
               : null,
+          submissions: {
+            spark: Boolean(room.sparkAnswers[viewer.id]),
+            finalStatement: Boolean(room.finalStatements[viewer.id]),
+            vote: Boolean(room.votes[viewer.id]),
+          },
         }
       : null,
     messages: room.messages,
