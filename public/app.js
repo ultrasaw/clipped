@@ -148,6 +148,17 @@ function formatRemaining(timestamp) {
   return `${minutes}:${seconds} remaining`;
 }
 
+function getTimerProgress() {
+  if (!state.phaseStartedAt || !state.phaseEndsAt) {
+    return 100;
+  }
+
+  const totalMs = Math.max(1, state.phaseEndsAt - state.phaseStartedAt);
+  const remainingMs = Math.max(0, state.phaseEndsAt - Date.now());
+
+  return Math.round((remainingMs / totalMs) * 100);
+}
+
 function actionForPhase(phase) {
   if (phase === "spark") {
     return {
@@ -202,6 +213,10 @@ function renderState() {
   const viewer = state.viewer;
   const label = phaseLabels[state.phase] || state.phase;
 
+  document.body.dataset.screen = getScreen();
+  document.body.dataset.phase = state.phase;
+  document.documentElement.dataset.screen = getScreen();
+  document.documentElement.dataset.phase = state.phase;
   renderScreens();
   phaseTitle.textContent = `${label}${state.round ? ` / Round ${state.round}` : ""}`;
   phaseMeta.textContent = state.result
@@ -281,12 +296,18 @@ function renderLobbyCountdown() {
 
   const remainingMs = Math.max(0, state.phaseEndsAt - Date.now());
   const seconds = Math.ceil(remainingMs / 1000);
+  const progress = getTimerProgress();
 
   lobbyCountdown.classList.remove("hidden");
   lobbyCountdown.innerHTML = `
-    <span>Starting in</span>
-    <strong>${String(seconds).padStart(2, "0")}</strong>
-    <span>seconds</span>
+    <div class="countdown-copy">
+      <span>Starting in</span>
+      <strong>${String(seconds).padStart(2, "0")}</strong>
+      <span>seconds</span>
+    </div>
+    <div class="countdown-track" aria-hidden="true">
+      <span class="countdown-fill" style="width: ${progress}%"></span>
+    </div>
   `;
 }
 
@@ -335,6 +356,7 @@ function renderPhasePanel() {
   const tiedPlayers = state.players.filter((player) => state.tiebreakPlayerIds?.includes(player.id));
   const tiedNames = tiedPlayers.map((player) => player.name).join(", ");
   const timer = state.phaseEndsAt ? formatRemaining(state.phaseEndsAt) : "Manual / waiting";
+  const progress = getTimerProgress();
 
   phasePanel.innerHTML = `
     <div>
@@ -347,7 +369,14 @@ function renderPhasePanel() {
           : ""
       }
     </div>
-    <span id="phaseTimer" class="timer-pill">${escapeHtml(timer)}</span>
+    <div class="phase-timer">
+      <span id="phaseTimer" class="timer-pill">${escapeHtml(timer)}</span>
+      ${
+        state.phaseEndsAt
+          ? `<div class="mini-timer-track" aria-hidden="true"><span id="phaseTimerFill" style="width: ${progress}%"></span></div>`
+          : ""
+      }
+    </div>
   `;
 }
 
@@ -364,6 +393,8 @@ function renderPlayers() {
     item.classList.toggle("ejected", player.status === "ejected");
     item.classList.toggle("you", player.isYou);
     item.classList.toggle("tied", state.tiebreakPlayerIds?.includes(player.id));
+    name.className = "player-name";
+    status.className = "player-status";
 
     name.textContent = `${player.name}${player.isYou ? " (you)" : ""}`;
     status.textContent = state.tiebreakPlayerIds?.includes(player.id)
@@ -387,14 +418,23 @@ function renderSpark() {
   const answers = Object.entries(state.sparkAnswers)
     .map(([id, answer]) => {
       const player = state.players.find((candidate) => candidate.id === id);
-      return `<li><strong>${escapeHtml(player ? player.name : "Unknown")}:</strong> ${escapeHtml(answer)}</li>`;
+      return `
+        <article class="spark-answer-card">
+          <span>${escapeHtml(player ? player.name : "Unknown")}</span>
+          <strong>${escapeHtml(answer)}</strong>
+        </article>
+      `;
     })
     .join("");
 
   sparkPanel.innerHTML = `
-    <p class="eyebrow">Spark</p>
-    <h3>${escapeHtml(state.sparkPrompt || "Spark answers")}</h3>
-    ${answers ? `<ul>${answers}</ul>` : "<p>Answers are hidden until reveal.</p>"}
+    <div class="spark-prompt">
+      <p class="eyebrow">Spark</p>
+      <h3>${escapeHtml(state.sparkPrompt || "Spark answers")}</h3>
+    </div>
+    <div class="spark-answers">
+      ${answers ? answers : "<p>Answers are hidden until reveal.</p>"}
+    </div>
   `;
 }
 
@@ -638,9 +678,14 @@ setInterval(() => {
       : "Waiting for players.";
 
   const timer = document.querySelector("#phaseTimer");
+  const timerFill = document.querySelector("#phaseTimerFill");
 
   if (timer) {
     timer.textContent = state.phaseEndsAt ? formatRemaining(state.phaseEndsAt) : "Manual / waiting";
+  }
+
+  if (timerFill) {
+    timerFill.style.width = `${getTimerProgress()}%`;
   }
 
   if (state.phase === "lobby") {
