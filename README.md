@@ -97,6 +97,7 @@ Important files:
 - `src/publicState.js`: safe state serialization for each viewer
 - `public/app.js`: browser rendering and action submission
 - `docs/AGENT_BLUEPRINT.md`: teammate-facing agent implementation guide
+- `docs/INTEGRATION_POINTS.md`: frontend, agent, infra, and game-manager integration contract
 
 ## Supported Actions
 
