@@ -3,21 +3,18 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { createDemoRoom, applyAction, addRoomEvent } = require("./src/game");
+const { createDemoRoom, applyAction, addRoomEvent, getRoomConfig } = require("./src/game");
 const { createMockAgentManager } = require("./src/agents");
-const { GAME_CONFIG } = require("./src/gameConfig");
 const { getPublicState } = require("./src/publicState");
+const { createRoomStore } = require("./src/roomStore");
 const logger = require("./src/logger");
 
 const HOST = process.env.HOST || "0.0.0.0";
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, "public");
 
-const clients = new Map();
-const room = createDemoRoom();
-let phaseTimer = null;
-let autoAdvanceTimer = null;
-let lobbyStartTimer = null;
+const roomStore = createRoomStore({ createRuntime });
+roomStore.createRoom({ id: "demo", name: "Demo Room" });
 
 function sendJson(res, statusCode, payload) {
   const body = JSON.stringify(payload);
@@ -58,26 +55,43 @@ function sendEvent(res, event, payload) {
   res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
 }
 
-function broadcastState() {
-  for (const client of clients.values()) {
+function createRuntime(options) {
+  const runtime = {
+    room: createDemoRoom(options),
+    clients: new Map(),
+    phaseTimer: null,
+    autoAdvanceTimer: null,
+    lobbyStartTimer: null,
+    agentManager: null,
+  };
+
+  runtime.agentManager = createMockAgentManager({
+    applyAction,
+    broadcastState: () => broadcastState(runtime),
+    logger,
+    submitAction: (action, context) => applyAndBroadcast(runtime, action, context),
+  });
+
+  return runtime;
+}
+
+function broadcastState(runtime) {
+  const { room } = runtime;
+
+  for (const client of runtime.clients.values()) {
     sendEvent(client.res, "state", getPublicState(room, client.playerId));
   }
 
   logger.debug("state broadcast", {
-    clients: clients.size,
+    room: room.id,
+    clients: runtime.clients.size,
     phase: room.phase,
     round: room.round,
   });
 }
 
-const agentManager = createMockAgentManager({
-  applyAction,
-  broadcastState,
-  logger,
-  submitAction: applyAndBroadcast,
-});
-
-async function applyAndBroadcast(action, context = {}) {
+async function applyAndBroadcast(runtime, action, context = {}) {
+  const { room } = runtime;
   const previousPhase = room.phase;
   const before = summarizeRoom(room);
   const previousEventCount = room.events.length;
@@ -122,43 +136,46 @@ async function applyAndBroadcast(action, context = {}) {
     });
   }
 
-  broadcastState();
+  broadcastState(runtime);
 
   if (result.ok && room.phase !== previousPhase) {
-    handlePhaseChanged(previousPhase);
+    handlePhaseChanged(runtime, previousPhase);
   } else if (result.ok) {
     if (action.type === "RESET_ROOM") {
-      clearPhaseTimer();
-      clearScheduledAdvance();
-      clearLobbyStartTimer();
+      clearPhaseTimer(runtime);
+      clearScheduledAdvance(runtime);
+      clearLobbyStartTimer(runtime);
     }
 
-    maybeScheduleLobbyStart(action);
+    maybeScheduleLobbyStart(runtime, action);
     logger.info("waiting", { for: describeWaitingFor(room) });
-    maybeScheduleAutoAdvance();
+    maybeScheduleAutoAdvance(runtime);
   }
 
-  logNewEvents(previousEventCount);
+  logNewEvents(room, previousEventCount);
 
   return result;
 }
 
-function handlePhaseChanged(previousPhase) {
-  clearLobbyStartTimer();
-  clearScheduledAdvance();
+function handlePhaseChanged(runtime, previousPhase) {
+  const { room } = runtime;
+
+  clearLobbyStartTimer(runtime);
+  clearScheduledAdvance(runtime);
   logger.info("phase changed", {
+    room: room.id,
     from: previousPhase,
     to: room.phase,
     round: room.round,
     waitingFor: describeWaitingFor(room),
   });
-  agentManager.handlePhaseEntered(room);
-  schedulePhaseTimer();
-  maybeScheduleAutoAdvance();
-  broadcastState();
+  runtime.agentManager.handlePhaseEntered(room);
+  schedulePhaseTimer(runtime);
+  maybeScheduleAutoAdvance(runtime);
+  broadcastState(runtime);
 }
 
-function logNewEvents(previousEventCount) {
+function logNewEvents(room, previousEventCount) {
   const newEvents = room.events.slice(previousEventCount);
 
   for (const event of newEvents) {
@@ -171,8 +188,10 @@ function logNewEvents(previousEventCount) {
   }
 }
 
-function schedulePhaseTimer() {
-  clearPhaseTimer();
+function schedulePhaseTimer(runtime) {
+  const { room } = runtime;
+
+  clearPhaseTimer(runtime);
 
   if (!room.phaseEndsAt) {
     return;
@@ -181,54 +200,59 @@ function schedulePhaseTimer() {
   const delayMs = Math.max(room.phaseEndsAt - Date.now(), 0);
 
   logger.info("phase timer scheduled", {
+    room: room.id,
     phase: room.phase,
     inMs: delayMs,
   });
 
-  phaseTimer = setTimeout(() => {
-    phaseTimer = null;
-    logger.info("phase timer elapsed", { phase: room.phase, waitingFor: describeWaitingFor(room) });
-    applyAndBroadcast({ type: "ADVANCE_PHASE" }, { source: "timer" }).catch((error) => {
+  runtime.phaseTimer = setTimeout(() => {
+    runtime.phaseTimer = null;
+    logger.info("phase timer elapsed", { room: room.id, phase: room.phase, waitingFor: describeWaitingFor(room) });
+    applyAndBroadcast(runtime, { type: "ADVANCE_PHASE" }, { source: "timer" }).catch((error) => {
       logger.error("phase timer advance failed", { error: error.message || String(error) });
     });
   }, delayMs);
 }
 
-function clearPhaseTimer() {
-  if (phaseTimer) {
-    clearTimeout(phaseTimer);
-    phaseTimer = null;
+function clearPhaseTimer(runtime) {
+  if (runtime.phaseTimer) {
+    clearTimeout(runtime.phaseTimer);
+    runtime.phaseTimer = null;
   }
 }
 
-function maybeScheduleAutoAdvance() {
-  if (autoAdvanceTimer || !shouldAutoAdvance(room)) {
+function maybeScheduleAutoAdvance(runtime) {
+  const { room } = runtime;
+
+  if (runtime.autoAdvanceTimer || !shouldAutoAdvance(room)) {
     return;
   }
 
   logger.info("auto advance scheduled", {
+    room: room.id,
     phase: room.phase,
     reason: describeWaitingFor(room),
     inMs: 700,
   });
 
-  autoAdvanceTimer = setTimeout(() => {
-    autoAdvanceTimer = null;
-    logger.info("auto advance triggered", { phase: room.phase });
-    applyAndBroadcast({ type: "ADVANCE_PHASE" }, { source: "auto" }).catch((error) => {
+  runtime.autoAdvanceTimer = setTimeout(() => {
+    runtime.autoAdvanceTimer = null;
+    logger.info("auto advance triggered", { room: room.id, phase: room.phase });
+    applyAndBroadcast(runtime, { type: "ADVANCE_PHASE" }, { source: "auto" }).catch((error) => {
       logger.error("auto advance failed", { error: error.message || String(error) });
     });
   }, 700);
 }
 
-function clearScheduledAdvance() {
-  if (autoAdvanceTimer) {
-    clearTimeout(autoAdvanceTimer);
-    autoAdvanceTimer = null;
+function clearScheduledAdvance(runtime) {
+  if (runtime.autoAdvanceTimer) {
+    clearTimeout(runtime.autoAdvanceTimer);
+    runtime.autoAdvanceTimer = null;
   }
 }
 
-function handleEvents(req, res, url) {
+function handleEvents(req, res, url, runtime) {
+  const { room } = runtime;
   const clientId = crypto.randomUUID();
   const playerId = url.searchParams.get("playerId") || null;
 
@@ -238,25 +262,27 @@ function handleEvents(req, res, url) {
     connection: "keep-alive",
   });
 
-  clients.set(clientId, { res, playerId });
+  runtime.clients.set(clientId, { res, playerId });
   sendEvent(res, "state", getPublicState(room, playerId));
   logger.info("sse connected", {
+    room: room.id,
     client: shortId(clientId),
     player: describeActor(room, playerId),
-    clients: clients.size,
+    clients: runtime.clients.size,
   });
 
   req.on("close", () => {
-    clients.delete(clientId);
+    runtime.clients.delete(clientId);
     logger.info("sse disconnected", {
+      room: room.id,
       client: shortId(clientId),
       player: describeActor(room, playerId),
-      clients: clients.size,
+      clients: runtime.clients.size,
     });
   });
 }
 
-async function handlePostAction(req, res) {
+async function handlePostAction(req, res, runtime) {
   const startedAt = Date.now();
 
   try {
@@ -264,7 +290,7 @@ async function handlePostAction(req, res) {
     const body = JSON.parse(rawBody || "{}");
     const playerId = typeof body.playerId === "string" ? body.playerId : null;
     const action = normalizeAction(body.action || {}, playerId);
-    const result = await applyAndBroadcast(action, { connectionId: playerId || null });
+    const result = await applyAndBroadcast(runtime, action, { connectionId: playerId || null });
 
     logger.debug("action response sent", {
       type: action.type,
@@ -344,24 +370,28 @@ function normalizeAction(action, playerId) {
   };
 }
 
-function handleGetState(req, res, url) {
+function handleGetState(req, res, url, runtime) {
+  const { room } = runtime;
   const playerId = url.searchParams.get("playerId") || null;
   logger.debug("state requested", { player: describeActor(room, playerId) });
   sendJson(res, 200, getPublicState(room, playerId));
 }
 
-function maybeScheduleLobbyStart(action) {
-  if (room.phase !== "lobby" || action.type !== "JOIN_ROOM" || lobbyStartTimer) {
+function maybeScheduleLobbyStart(runtime, action) {
+  const { room } = runtime;
+  const config = getRoomConfig(room);
+
+  if (room.phase !== "lobby" || action.type !== "JOIN_ROOM" || runtime.lobbyStartTimer) {
     return;
   }
 
   const humanCount = room.players.filter((player) => player.role === "human").length;
 
-  if (humanCount < GAME_CONFIG.players.humansRequired) {
+  if (humanCount < config.players.humansRequired) {
     return;
   }
 
-  const delayMs = GAME_CONFIG.players.lobbyAutoStartDelay;
+  const delayMs = config.players.lobbyAutoStartDelay;
   room.phaseStartedAt = Date.now();
   room.phaseEndsAt = room.phaseStartedAt + delayMs;
   addRoomEvent(room, "LOBBY_AUTOSTART_SCHEDULED", {
@@ -369,36 +399,51 @@ function maybeScheduleLobbyStart(action) {
     humanCount,
   });
   logger.info("lobby auto-start scheduled", { inMs: delayMs, humanCount });
-  broadcastState();
+  broadcastState(runtime);
 
-  lobbyStartTimer = setTimeout(() => {
-    lobbyStartTimer = null;
+  runtime.lobbyStartTimer = setTimeout(() => {
+    runtime.lobbyStartTimer = null;
 
     if (room.phase !== "lobby") {
       return;
     }
 
     logger.info("lobby auto-start triggered");
-    applyAndBroadcast({ type: "START_GAME" }, { source: "auto" });
+    applyAndBroadcast(runtime, { type: "START_GAME" }, { source: "auto" }).catch((error) => {
+      logger.error("lobby auto-start failed", { error: error.message || String(error) });
+    });
   }, delayMs);
 }
 
-function clearLobbyStartTimer() {
-  if (lobbyStartTimer) {
-    clearTimeout(lobbyStartTimer);
-    lobbyStartTimer = null;
+function clearLobbyStartTimer(runtime) {
+  if (runtime.lobbyStartTimer) {
+    clearTimeout(runtime.lobbyStartTimer);
+    runtime.lobbyStartTimer = null;
   }
 }
 
-function getHealthPayload() {
+function getHealthPayload(runtime = null) {
+  if (!runtime) {
+    return {
+      ok: true,
+      rooms: roomStore.listRooms().length,
+      clients: roomStore.getClientCount(),
+      uptimeSeconds: Math.floor(process.uptime()),
+    };
+  }
+
+  const { room } = runtime;
+
   return {
     ok: true,
+    roomId: room.id,
+    roomName: room.name,
     phase: room.phase,
     round: room.round,
     maxRounds: room.maxRounds,
     players: room.players.length,
     alivePlayers: room.players.filter((player) => player.status === "alive").length,
-    clients: clients.size,
+    clients: runtime.clients.size,
     messages: room.messages.length,
     events: room.events.length,
     uptimeSeconds: Math.floor(process.uptime()),
@@ -407,7 +452,15 @@ function getHealthPayload() {
 }
 
 function handleHealth(req, res, url) {
-  const payload = getHealthPayload();
+  const roomId = url.searchParams.get("roomId");
+  const runtime = roomId ? roomStore.getRoom(roomId) : null;
+
+  if (roomId && !runtime) {
+    sendJson(res, 404, { ok: false, error: "Room not found." });
+    return;
+  }
+
+  const payload = getHealthPayload(runtime);
 
   if (wantsJson(req, url)) {
     sendJson(res, 200, payload);
@@ -417,9 +470,12 @@ function handleHealth(req, res, url) {
   sendHtml(res, 200, renderHealthPage(payload));
 }
 
-function getDebugEventsPayload() {
+function getDebugEventsPayload(runtime) {
+  const { room } = runtime;
+
   return {
     roomId: room.id,
+    roomName: room.name,
     phase: room.phase,
     round: room.round,
     events: room.events,
@@ -427,7 +483,15 @@ function getDebugEventsPayload() {
 }
 
 function handleDebugEvents(req, res, url) {
-  const payload = getDebugEventsPayload();
+  const roomId = url.searchParams.get("roomId") || "demo";
+  const runtime = roomStore.getRoom(roomId);
+
+  if (!runtime) {
+    sendJson(res, 404, { ok: false, error: "Room not found." });
+    return;
+  }
+
+  const payload = getDebugEventsPayload(runtime);
 
   if (wantsJson(req, url)) {
     sendJson(res, 200, payload);
@@ -437,8 +501,90 @@ function handleDebugEvents(req, res, url) {
   sendHtml(res, 200, renderDebugEventsPage(payload));
 }
 
+function getRoomSummary(runtime) {
+  const { room } = runtime;
+  const config = getRoomConfig(room);
+  const humanPlayers = room.players.filter((player) => player.role === "human");
+
+  return {
+    id: room.id,
+    name: room.name,
+    phase: room.phase,
+    round: room.round,
+    maxRounds: room.maxRounds,
+    players: room.players.length,
+    humansJoined: humanPlayers.length,
+    humansRequired: config.players.humansRequired,
+    aiCount: config.players.aiCount,
+    chatDurationSeconds: config.phaseDurations.chat / 1000,
+    canJoin: room.phase === "lobby" && humanPlayers.length < config.players.humansRequired,
+    createdAt: room.createdAt,
+  };
+}
+
+function handleListRooms(req, res) {
+  sendJson(res, 200, {
+    ok: true,
+    rooms: roomStore.listRooms().map(getRoomSummary),
+  });
+}
+
+async function handleCreateRoom(req, res) {
+  try {
+    const rawBody = await readBody(req);
+    const body = JSON.parse(rawBody || "{}");
+    const name = String(body.name || "New Room").trim().slice(0, 40) || "New Room";
+    const runtime = roomStore.createRoom({
+      name,
+      config: body.config || {},
+    });
+
+    addRoomEvent(runtime.room, "ROOM_CREATED", {
+      roomId: runtime.room.id,
+      roomName: runtime.room.name,
+      config: {
+        humansRequired: getRoomConfig(runtime.room).players.humansRequired,
+        aiCount: getRoomConfig(runtime.room).players.aiCount,
+        maxRounds: runtime.room.maxRounds,
+        chatDurationSeconds: getRoomConfig(runtime.room).phaseDurations.chat / 1000,
+      },
+    });
+
+    logger.info("room created", getRoomSummary(runtime));
+    sendJson(res, 201, { ok: true, room: getRoomSummary(runtime) });
+  } catch (error) {
+    logger.warn("room creation failed", { error: error.message });
+    sendJson(res, 400, { ok: false, error: error.message || "Room creation failed." });
+  }
+}
+
+function getRoomRoute(pathname, suffix) {
+  const match = pathname.match(new RegExp(`^/api/rooms/([^/]+)/${suffix}$`));
+
+  if (!match) {
+    return null;
+  }
+
+  return decodeURIComponent(match[1]);
+}
+
+function getRuntimeOr404(res, roomId) {
+  const runtime = roomStore.getRoom(roomId);
+
+  if (!runtime) {
+    sendJson(res, 404, { ok: false, error: "Room not found." });
+    return null;
+  }
+
+  return runtime;
+}
+
 function serveStatic(req, res) {
-  const requestedPath = req.url === "/" ? "/index.html" : req.url;
+  const requestedUrl = new URL(req.url, `http://${req.headers.host}`);
+  const requestedPath =
+    requestedUrl.pathname === "/" || requestedUrl.pathname.startsWith("/rooms/")
+      ? "/index.html"
+      : requestedUrl.pathname;
   const safePath = path.normalize(decodeURIComponent(requestedPath)).replace(/^(\.\.[/\\])+/, "");
   const filePath = path.join(PUBLIC_DIR, safePath);
 
@@ -474,13 +620,91 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   logger.debug("http request", { method: req.method, path: url.pathname });
 
+  if (req.method === "GET" && url.pathname === "/api/rooms") {
+    handleListRooms(req, res);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/rooms") {
+    handleCreateRoom(req, res);
+    return;
+  }
+
+  const eventsRoomId = getRoomRoute(url.pathname, "events");
+
+  if (req.method === "GET" && eventsRoomId) {
+    const runtime = getRuntimeOr404(res, eventsRoomId);
+
+    if (runtime) {
+      handleEvents(req, res, url, runtime);
+    }
+
+    return;
+  }
+
+  const stateRoomId = getRoomRoute(url.pathname, "state");
+
+  if (req.method === "GET" && stateRoomId) {
+    const runtime = getRuntimeOr404(res, stateRoomId);
+
+    if (runtime) {
+      handleGetState(req, res, url, runtime);
+    }
+
+    return;
+  }
+
+  const actionsRoomId = getRoomRoute(url.pathname, "actions");
+
+  if (req.method === "POST" && actionsRoomId) {
+    const runtime = getRuntimeOr404(res, actionsRoomId);
+
+    if (runtime) {
+      handlePostAction(req, res, runtime);
+    }
+
+    return;
+  }
+
+  const resetRoomId = getRoomRoute(url.pathname, "admin/reset");
+
+  if (req.method === "POST" && resetRoomId) {
+    const runtime = getRuntimeOr404(res, resetRoomId);
+
+    if (runtime) {
+      applyAndBroadcast(runtime, { type: "RESET_ROOM" }, { source: "admin" })
+        .then((result) => sendJson(res, result.ok ? 200 : 400, result))
+        .catch((error) => sendJson(res, 500, { ok: false, error: error.message || "Reset failed." }));
+    }
+
+    return;
+  }
+
+  const debugEventsRoomId = getRoomRoute(url.pathname, "debug/events");
+
+  if (req.method === "GET" && debugEventsRoomId) {
+    const runtime = getRuntimeOr404(res, debugEventsRoomId);
+
+    if (runtime) {
+      const payload = getDebugEventsPayload(runtime);
+
+      if (wantsJson(req, url)) {
+        sendJson(res, 200, payload);
+      } else {
+        sendHtml(res, 200, renderDebugEventsPage(payload));
+      }
+    }
+
+    return;
+  }
+
   if (req.method === "GET" && url.pathname === "/events") {
-    handleEvents(req, res, url);
+    handleEvents(req, res, url, roomStore.getRoom("demo"));
     return;
   }
 
   if (req.method === "GET" && url.pathname === "/state") {
-    handleGetState(req, res, url);
+    handleGetState(req, res, url, roomStore.getRoom("demo"));
     return;
   }
 
@@ -495,7 +719,7 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === "POST" && url.pathname === "/actions") {
-    handlePostAction(req, res);
+    handlePostAction(req, res, roomStore.getRoom("demo"));
     return;
   }
 
@@ -731,6 +955,35 @@ function renderDebugShell({ title, eyebrow, body }) {
 }
 
 function renderHealthPage(payload) {
+  if (!payload.phase) {
+    const body = `
+      <section class="card">
+        <div class="grid">
+          ${renderMetric("Status", payload.ok ? "OK" : "Down", payload.ok ? "ok" : "bad")}
+          ${renderMetric("Rooms", payload.rooms)}
+          ${renderMetric("Clients", payload.clients)}
+          ${renderMetric("Uptime", formatDuration(payload.uptimeSeconds))}
+        </div>
+      </section>
+      <section class="section-title">
+        <div>
+          <p class="eyebrow">Rooms</p>
+          <span class="pill">Use /api/rooms for JSON summaries</span>
+        </div>
+        <span class="pill">Auto-refreshes every 5s</span>
+      </section>
+      <section class="card">
+        <pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>
+      </section>
+    `;
+
+    return renderDebugShell({
+      title: "Server Health",
+      eyebrow: "Clipped Diagnostics",
+      body,
+    });
+  }
+
   const statusClass = payload.ok ? "ok" : "bad";
   const body = `
     <section class="card">
@@ -909,6 +1162,7 @@ function summarizeRoom(currentRoom) {
 }
 
 function describeWaitingFor(currentRoom) {
+  const config = getRoomConfig(currentRoom);
   const alivePlayers = currentRoom.players.filter((player) => player.status === "alive");
   const missingSpark = alivePlayers.filter((player) => !currentRoom.sparkAnswers[player.id]);
   const missingFinal = alivePlayers.filter((player) => !currentRoom.finalStatements[player.id]);
@@ -923,8 +1177,8 @@ function describeWaitingFor(currentRoom) {
   const humanCount = currentRoom.players.filter((player) => player.role === "human").length;
 
   if (currentRoom.phase === "lobby") {
-    if (humanCount < GAME_CONFIG.players.humansRequired) {
-      return `${GAME_CONFIG.players.humansRequired - humanCount} more human player(s) to join`;
+    if (humanCount < config.players.humansRequired) {
+      return `${config.players.humansRequired - humanCount} more human player(s) to join`;
     }
 
     return currentRoom.phaseEndsAt ? "game starts soon" : "game start";
@@ -1053,5 +1307,8 @@ server.listen(PORT, HOST, () => {
     logger.warn("no local network ip detected", { hint: "Check Wi-Fi/Ethernet connection." });
   }
 
-  logger.info("waiting", { for: describeWaitingFor(room) });
+  logger.info("rooms ready", {
+    rooms: roomStore.listRooms().map((runtime) => runtime.room.id),
+    waitingFor: describeWaitingFor(roomStore.getRoom("demo").room),
+  });
 });

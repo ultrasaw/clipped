@@ -114,13 +114,13 @@ Dev mode currently shows:
 Frontend connects to:
 
 ```text
-GET /events
+GET /api/rooms/:roomId/events
 ```
 
 If the browser has a local player ID:
 
 ```text
-GET /events?playerId=<playerId>
+GET /api/rooms/:roomId/events?playerId=<playerId>
 ```
 
 The server sends `state` events using Server-Sent Events.
@@ -140,9 +140,11 @@ Important fields:
 ```js
 {
   id,
+  name,
   phase,
   round,
   maxRounds,
+  config,
   sparkPrompt,
   phaseStartedAt,
   phaseEndsAt,
@@ -188,7 +190,7 @@ instead of reading private server room state.
 All human and agent gameplay changes go through:
 
 ```text
-POST /actions
+POST /api/rooms/:roomId/actions
 ```
 
 Request body:
@@ -234,6 +236,75 @@ or:
 | `SUBMIT_TIEBREAK` | Tied human/agent | `tiebreak_statements` | Only tied players can submit. |
 | `CAST_TIEBREAK_VOTE` | Non-tied human/agent | `tiebreak_vote` | Only non-tied alive players vote. Target must be tied. |
 | `RESET_ROOM` | Dev UI | Any | Resets the demo room. |
+
+Compatibility endpoints still point at the default `demo` room:
+
+```text
+GET /events
+GET /state
+POST /actions
+```
+
+Prefer the room-scoped endpoints for new work.
+
+## Room Contract
+
+Rooms are owned by the server and stored in memory for now.
+
+List rooms:
+
+```text
+GET /api/rooms
+```
+
+Create room:
+
+```text
+POST /api/rooms
+```
+
+Example body:
+
+```json
+{
+  "name": "Friday Playtest",
+  "config": {
+    "humansRequired": 2,
+    "maxRounds": 3,
+    "chatDurationSeconds": 120
+  }
+}
+```
+
+Open a room in the browser:
+
+```text
+GET /rooms/:roomId
+```
+
+Room-scoped state:
+
+```text
+GET /api/rooms/:roomId/state
+```
+
+Room-scoped debug events:
+
+```text
+GET /api/rooms/:roomId/debug/events
+```
+
+Room-scoped admin reset:
+
+```text
+POST /api/rooms/:roomId/admin/reset
+```
+
+Current room storage is intentionally in-memory:
+
+- It is enough for hackathon validation.
+- Rooms disappear when the server restarts.
+- Add database persistence only after the room flow is validated.
 
 If a new action is added, update:
 
@@ -441,12 +512,14 @@ Browser-friendly:
 
 ```text
 GET /debug/events
+GET /api/rooms/:roomId/debug/events
 ```
 
 JSON:
 
 ```text
 GET /debug/events?format=json
+GET /api/rooms/:roomId/debug/events?format=json
 ```
 
 This shows the in-memory event log for playtest debugging.
@@ -551,7 +624,6 @@ Do not add these unless the team explicitly decides to:
 - Auth/login.
 - Database persistence.
 - Matchmaking.
-- Multiple simultaneous rooms.
 - Public admin reset without protection.
 - Client-side hidden role logic.
 

@@ -1,6 +1,6 @@
 const crypto = require("node:crypto");
 const { createAiPlayers } = require("./agents");
-const { GAME_CONFIG } = require("./gameConfig");
+const { createRoomConfig } = require("./gameConfig");
 const { createQuestion } = require("./questions");
 
 const PHASES = [
@@ -16,12 +16,21 @@ const PHASES = [
   "game_over",
 ];
 
-function createDemoRoom() {
+function getRoomConfig(room) {
+  return room.config || createRoomConfig();
+}
+
+function createDemoRoom(options = {}) {
+  const config = createRoomConfig(options.config);
+
   return {
-    id: "demo",
+    id: options.id || "demo",
+    name: options.name || "Demo Room",
+    createdAt: Date.now(),
+    config,
     phase: "lobby",
     round: 0,
-    maxRounds: GAME_CONFIG.rounds.maxRounds,
+    maxRounds: config.rounds.maxRounds,
     players: [],
     messages: [
       {
@@ -61,15 +70,17 @@ function addRoomEvent(room, type, payload = {}) {
     ...payload,
   });
 
-  if (room.events.length > GAME_CONFIG.textLimits.maxStoredEvents) {
+  if (room.events.length > getRoomConfig(room).textLimits.maxStoredEvents) {
     room.events.shift();
   }
 }
 
-function createHumanPlayer(name, connectionId = null) {
+function createHumanPlayer(room, name, connectionId = null) {
+  const config = getRoomConfig(room);
+
   return {
     id: crypto.randomUUID(),
-    name: cleanText(name, GAME_CONFIG.textLimits.playerName),
+    name: cleanText(name, config.textLimits.playerName),
     role: "human",
     status: "alive",
     connectionId,
@@ -104,6 +115,8 @@ function addSystemMessage(room, text) {
 }
 
 function addPlayerMessage(room, player, text, kind = "chat") {
+  const config = getRoomConfig(room);
+
   room.messages.push({
     id: crypto.randomUUID(),
     playerId: player.id,
@@ -113,18 +126,19 @@ function addPlayerMessage(room, player, text, kind = "chat") {
     kind,
   });
 
-  if (room.messages.length > GAME_CONFIG.textLimits.maxStoredMessages) {
+  if (room.messages.length > config.textLimits.maxStoredMessages) {
     room.messages.shift();
   }
 }
 
 async function enterPhase(room, nextPhase) {
   const previousPhase = room.phase;
+  const config = getRoomConfig(room);
 
   room.phase = nextPhase;
   room.phaseStartedAt = Date.now();
-  room.phaseEndsAt = GAME_CONFIG.phaseDurations[nextPhase]
-    ? room.phaseStartedAt + GAME_CONFIG.phaseDurations[nextPhase]
+  room.phaseEndsAt = config.phaseDurations[nextPhase]
+    ? room.phaseStartedAt + config.phaseDurations[nextPhase]
     : null;
 
   addRoomEvent(room, "PHASE_CHANGED", {
@@ -180,25 +194,26 @@ async function enterPhase(room, nextPhase) {
 }
 
 async function startGame(room) {
+  const config = getRoomConfig(room);
   const humans = room.players.filter((player) => player.role === "human");
 
-  if (humans.length < GAME_CONFIG.players.humansRequired) {
+  if (humans.length < config.players.humansRequired) {
     return {
       ok: false,
-      error: `${GAME_CONFIG.players.humansRequired} human players must join before starting.`,
+      error: `${config.players.humansRequired} human players must join before starting.`,
     };
   }
 
-  room.players = humans.slice(0, GAME_CONFIG.players.humansRequired);
-  room.players.push(...createAiPlayers(0, GAME_CONFIG.players.aiCount));
+  room.players = humans.slice(0, config.players.humansRequired);
+  room.players.push(...createAiPlayers(0, config.players.aiCount));
   room.round = 0;
   room.eliminatedPlayerIds = [];
   room.revealedRoles = {};
   room.result = null;
   addSystemMessage(room, "The room fills with six voices. Two are human.");
   addRoomEvent(room, "GAME_STARTED", {
-    humansRequired: GAME_CONFIG.players.humansRequired,
-    aiCount: GAME_CONFIG.players.aiCount,
+    humansRequired: config.players.humansRequired,
+    aiCount: config.players.aiCount,
     playerCount: room.players.length,
   });
   await enterPhase(room, "spark");
@@ -290,6 +305,7 @@ function assertAlive(room, playerId) {
 }
 
 function submitSpark(room, playerId, text) {
+  const config = getRoomConfig(room);
   const phaseError = assertPhase(room, "spark");
   const aliveError = assertAlive(room, playerId);
 
@@ -297,7 +313,7 @@ function submitSpark(room, playerId, text) {
     return { ok: false, error: phaseError || aliveError };
   }
 
-  const answer = cleanText(text, GAME_CONFIG.textLimits.sparkAnswer);
+  const answer = cleanText(text, config.textLimits.sparkAnswer);
 
   if (!answer) {
     return { ok: false, error: "Spark answer cannot be empty." };
@@ -309,6 +325,7 @@ function submitSpark(room, playerId, text) {
 }
 
 function sendChat(room, playerId, text) {
+  const config = getRoomConfig(room);
   const phaseError = assertPhase(room, "chat");
   const aliveError = assertAlive(room, playerId);
 
@@ -316,7 +333,7 @@ function sendChat(room, playerId, text) {
     return { ok: false, error: phaseError || aliveError };
   }
 
-  const message = cleanText(text, GAME_CONFIG.textLimits.chatMessage);
+  const message = cleanText(text, config.textLimits.chatMessage);
 
   if (!message) {
     return { ok: false, error: "Message cannot be empty." };
@@ -328,6 +345,7 @@ function sendChat(room, playerId, text) {
 }
 
 function submitFinal(room, playerId, text) {
+  const config = getRoomConfig(room);
   const phaseError = assertPhase(room, "final_statements");
   const aliveError = assertAlive(room, playerId);
 
@@ -335,7 +353,7 @@ function submitFinal(room, playerId, text) {
     return { ok: false, error: phaseError || aliveError };
   }
 
-  const statement = cleanText(text, GAME_CONFIG.textLimits.finalStatement);
+  const statement = cleanText(text, config.textLimits.finalStatement);
 
   if (!statement) {
     return { ok: false, error: "Final statement cannot be empty." };
@@ -348,6 +366,7 @@ function submitFinal(room, playerId, text) {
 }
 
 function submitTiebreak(room, playerId, text) {
+  const config = getRoomConfig(room);
   const phaseError = assertPhase(room, "tiebreak_statements");
   const aliveError = assertAlive(room, playerId);
 
@@ -359,7 +378,7 @@ function submitTiebreak(room, playerId, text) {
     return { ok: false, error: "Only tied players can submit tiebreak statements." };
   }
 
-  const statement = cleanText(text, GAME_CONFIG.textLimits.tiebreakStatement);
+  const statement = cleanText(text, config.textLimits.tiebreakStatement);
 
   if (!statement) {
     return { ok: false, error: "Tiebreak statement cannot be empty." };
@@ -598,11 +617,13 @@ function resolveGame(room) {
 }
 
 function joinRoom(room, action, context) {
+  const config = getRoomConfig(room);
+
   if (room.phase !== "lobby") {
     return { ok: false, error: "Players can only join during the lobby." };
   }
 
-  const name = cleanText(action.name, GAME_CONFIG.textLimits.playerName);
+  const name = cleanText(action.name, config.textLimits.playerName);
 
   if (!name) {
     return { ok: false, error: "Name is required." };
@@ -620,14 +641,14 @@ function joinRoom(room, action, context) {
     return { ok: true, playerId: existing.id };
   }
 
-  if (room.players.filter((player) => player.role === "human").length >= GAME_CONFIG.players.humansRequired) {
+  if (room.players.filter((player) => player.role === "human").length >= config.players.humansRequired) {
     return {
       ok: false,
-      error: `The demo room already has ${GAME_CONFIG.players.humansRequired} human players.`,
+      error: `This room already has ${config.players.humansRequired} human players.`,
     };
   }
 
-  const player = createHumanPlayer(name, context.connectionId);
+  const player = createHumanPlayer(room, name, context.connectionId);
   room.players.push(player);
   addSystemMessage(room, `${player.name} joined the lobby.`);
   addRoomEvent(room, "PLAYER_JOINED", {
@@ -639,7 +660,11 @@ function joinRoom(room, action, context) {
 }
 
 function resetRoom(room) {
-  const freshRoom = createDemoRoom();
+  const freshRoom = createDemoRoom({
+    id: room.id,
+    name: room.name,
+    config: room.config,
+  });
 
   for (const key of Object.keys(room)) {
     delete room[key];
@@ -698,4 +723,5 @@ module.exports = {
   applyAction,
   advancePhase,
   addRoomEvent,
+  getRoomConfig,
 };

@@ -1,11 +1,20 @@
 function getPublicState(room, viewerPlayerId = null) {
   const viewer = room.players.find((player) => player.id === viewerPlayerId);
+  const config = room.config;
 
   return {
     id: room.id,
+    name: room.name,
     phase: room.phase,
     round: room.round,
     maxRounds: room.maxRounds,
+    config: config
+      ? {
+          humansRequired: config.players.humansRequired,
+          aiCount: config.players.aiCount,
+          chatDurationSeconds: config.phaseDurations.chat / 1000,
+        }
+      : null,
     sparkPrompt: room.sparkPrompt,
     phaseStartedAt: room.phaseStartedAt,
     phaseEndsAt: room.phaseEndsAt,
