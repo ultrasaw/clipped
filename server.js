@@ -141,6 +141,8 @@ async function applyAndBroadcast(runtime, action, context = {}) {
   if (result.ok && room.phase !== previousPhase) {
     handlePhaseChanged(runtime, previousPhase);
   } else if (result.ok) {
+    runtime.agentManager.handleActionAccepted(room, action);
+
     if (action.type === "RESET_ROOM") {
       clearPhaseTimer(runtime);
       clearScheduledAdvance(runtime);
