@@ -51,10 +51,12 @@ function fillTemplate(template, target) {
   return template.replaceAll("{target}", target.name);
 }
 
-function createMockAgentManager({ applyAction, broadcastState }) {
+function createMockAgentManager({ applyAction, broadcastState, logger, submitAction }) {
   const timeouts = new Set();
 
-  function schedule(callback, delayMs) {
+  function schedule(label, callback, delayMs) {
+    logger?.debug("agent scheduled", { label, inMs: delayMs });
+
     const timeout = setTimeout(() => {
       timeouts.delete(timeout);
       callback();
@@ -64,6 +66,10 @@ function createMockAgentManager({ applyAction, broadcastState }) {
   }
 
   function cancelAll() {
+    if (timeouts.size > 0) {
+      logger?.debug("agent timers cancelled", { count: timeouts.size });
+    }
+
     for (const timeout of timeouts) {
       clearTimeout(timeout);
     }
@@ -72,10 +78,25 @@ function createMockAgentManager({ applyAction, broadcastState }) {
   }
 
   function submitAiAction(room, action) {
+    if (submitAction) {
+      submitAction(action, { source: "agent" });
+      return;
+    }
+
     const result = applyAction(room, action, { source: "agent" });
 
     if (!result.ok) {
       room.errors.push(result.error);
+      logger?.warn("agent action rejected", {
+        type: action.type,
+        actor: action.playerId || action.voterId,
+        error: result.error,
+      });
+    } else {
+      logger?.info("agent action accepted", {
+        type: action.type,
+        actor: action.playerId || action.voterId,
+      });
     }
 
     broadcastState();
@@ -85,10 +106,11 @@ function createMockAgentManager({ applyAction, broadcastState }) {
     cancelAll();
 
     const agents = room.players.filter((player) => player.role === "ai" && player.status === "alive");
+    logger?.info("agent manager handling phase", { phase: room.phase, agents: agents.length });
 
     if (room.phase === "spark") {
       agents.forEach((agent, index) => {
-        schedule(() => {
+        schedule(`${agent.name} spark answer`, () => {
           submitAiAction(room, {
             type: "SUBMIT_SPARK",
             playerId: agent.id,
@@ -100,10 +122,11 @@ function createMockAgentManager({ applyAction, broadcastState }) {
 
     if (room.phase === "chat") {
       agents.forEach((agent, index) => {
-        schedule(() => {
+        schedule(`${agent.name} chat message`, () => {
           const target = pick(livingTargets(room, agent.id));
 
           if (!target) {
+            logger?.warn("agent has no chat target", { agent: agent.name });
             return;
           }
 
@@ -118,10 +141,11 @@ function createMockAgentManager({ applyAction, broadcastState }) {
 
     if (room.phase === "final_statements") {
       agents.forEach((agent, index) => {
-        schedule(() => {
+        schedule(`${agent.name} final statement`, () => {
           const target = pick(livingTargets(room, agent.id));
 
           if (!target) {
+            logger?.warn("agent has no final target", { agent: agent.name });
             return;
           }
 
@@ -136,10 +160,11 @@ function createMockAgentManager({ applyAction, broadcastState }) {
 
     if (room.phase === "vote") {
       agents.forEach((agent, index) => {
-        schedule(() => {
+        schedule(`${agent.name} vote`, () => {
           const target = pick(livingTargets(room, agent.id));
 
           if (!target) {
+            logger?.warn("agent has no vote target", { agent: agent.name });
             return;
           }
 

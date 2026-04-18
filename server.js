@@ -6,6 +6,7 @@ const crypto = require("node:crypto");
 const { createDemoRoom, applyAction } = require("./src/game");
 const { createMockAgentManager } = require("./src/agents");
 const { getPublicState } = require("./src/publicState");
+const logger = require("./src/logger");
 
 const HOST = process.env.HOST || "0.0.0.0";
 const PORT = Number(process.env.PORT || 3000);
@@ -49,26 +50,65 @@ function broadcastState() {
   for (const client of clients.values()) {
     sendEvent(client.res, "state", getPublicState(room, client.playerId));
   }
+
+  logger.debug("state broadcast", {
+    clients: clients.size,
+    phase: room.phase,
+    round: room.round,
+  });
 }
 
 const agentManager = createMockAgentManager({
   applyAction,
   broadcastState,
+  logger,
+  submitAction: applyAndBroadcast,
 });
 
 function applyAndBroadcast(action, context = {}) {
   const previousPhase = room.phase;
+  const before = summarizeRoom(room);
+
+  logger.info("action received", {
+    source: context.source || "client",
+    type: action.type,
+    actor: describeActor(room, action.playerId || action.voterId),
+    target: describeActor(room, action.targetId),
+    phase: room.phase,
+    round: room.round,
+  });
+
   const result = applyAction(room, action, context);
 
   if (!result.ok) {
     room.errors.push(result.error);
+    logger.warn("action rejected", {
+      type: action.type,
+      actor: describeActor(room, action.playerId || action.voterId),
+      error: result.error,
+    });
+  } else {
+    logger.info("action accepted", {
+      type: action.type,
+      actor: describeActor(room, action.playerId || action.voterId || result.playerId),
+      before: before.summary,
+      after: summarizeRoom(room).summary,
+    });
   }
 
   broadcastState();
 
   if (result.ok && room.phase !== previousPhase) {
+    logger.info("phase changed", {
+      from: previousPhase,
+      to: room.phase,
+      round: room.round,
+      waitingFor: describeWaitingFor(room),
+    });
     agentManager.handlePhaseEntered(room);
     broadcastState();
+  } else if (result.ok) {
+    logger.info("waiting", { for: describeWaitingFor(room) });
   }
 
   return result;
@@ -86,13 +126,25 @@ function handleEvents(req, res, url) {
 
   clients.set(clientId, { res, playerId });
   sendEvent(res, "state", getPublicState(room, playerId));
+  logger.info("sse connected", {
+    client: shortId(clientId),
+    player: describeActor(room, playerId),
+    clients: clients.size,
+  });
 
   req.on("close", () => {
     clients.delete(clientId);
+    logger.info("sse disconnected", {
+      client: shortId(clientId),
+      player: describeActor(room, playerId),
+      clients: clients.size,
+    });
   });
 }
 
 async function handlePostAction(req, res) {
+  const startedAt = Date.now();
+
   try {
     const rawBody = await readBody(req);
     const body = JSON.parse(rawBody || "{}");
@@ -100,8 +152,18 @@ async function handlePostAction(req, res) {
     const action = normalizeAction(body.action || {}, playerId);
     const result = applyAndBroadcast(action, { connectionId: playerId || null });
 
+    logger.debug("action response sent", {
+      type: action.type,
+      ok: result.ok,
+      status: result.ok ? 200 : 400,
+      durationMs: Date.now() - startedAt,
+    });
     sendJson(res, result.ok ? 200 : 400, result);
   } catch (error) {
+    logger.error("action request failed", {
+      error: error.message || "Invalid request.",
+      durationMs: Date.now() - startedAt,
+    });
     sendJson(res, 400, { ok: false, error: error.message || "Invalid request." });
   }
 }
@@ -154,6 +216,7 @@ function normalizeAction(action, playerId) {
 
 function handleGetState(req, res, url) {
   const playerId = url.searchParams.get("playerId") || null;
+  logger.debug("state requested", { player: describeActor(room, playerId) });
   sendJson(res, 200, getPublicState(room, playerId));
 }
 
@@ -170,6 +233,7 @@ function serveStatic(req, res) {
 
   fs.readFile(filePath, (error, file) => {
     if (error) {
+      logger.warn("static file not found", { path: requestedPath });
       res.writeHead(404);
       res.end("Not found");
       return;
@@ -191,6 +255,7 @@ function serveStatic(req, res) {
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
+  logger.debug("http request", { method: req.method, path: url.pathname });
 
   if (req.method === "GET" && url.pathname === "/events") {
     handleEvents(req, res, url);
@@ -213,9 +278,94 @@ const server = http.createServer((req, res) => {
   }
 
   sendJson(res, 405, { ok: false, error: "Method not allowed." });
+  logger.warn("method not allowed", { method: req.method, path: url.pathname });
 });
 
+function shortId(id) {
+  return id ? id.slice(0, 8) : "none";
+}
+
+function describeActor(currentRoom, playerId) {
+  if (!playerId) {
+    return undefined;
+  }
+
+  const player = currentRoom.players.find((candidate) => candidate.id === playerId);
+
+  if (!player) {
+    return shortId(playerId);
+  }
+
+  return `${player.name}/${player.role}/${player.status}`;
+}
+
+function summarizeRoom(currentRoom) {
+  const alive = currentRoom.players.filter((player) => player.status === "alive");
+  const humans = currentRoom.players.filter((player) => player.role === "human");
+  const aliveHumans = humans.filter((player) => player.status === "alive");
+
+  return {
+    alive: alive.length,
+    humans: humans.length,
+    aliveHumans: aliveHumans.length,
+    messages: currentRoom.messages.length,
+    summary: `phase=${currentRoom.phase} round=${currentRoom.round} players=${currentRoom.players.length} alive=${alive.length} humansAlive=${aliveHumans.length}`,
+  };
+}
+
+function describeWaitingFor(currentRoom) {
+  const alivePlayers = currentRoom.players.filter((player) => player.status === "alive");
+  const missingSpark = alivePlayers.filter((player) => !currentRoom.sparkAnswers[player.id]);
+  const missingFinal = alivePlayers.filter((player) => !currentRoom.finalStatements[player.id]);
+  const missingVotes = alivePlayers.filter((player) => !currentRoom.votes[player.id]);
+  const humanCount = currentRoom.players.filter((player) => player.role === "human").length;
+
+  if (currentRoom.phase === "lobby") {
+    return humanCount < 2 ? `${2 - humanCount} more human player(s) to join` : "game start";
+  }
+
+  if (currentRoom.phase === "spark") {
+    return missingSpark.length
+      ? `spark answers from ${missingSpark.map((player) => player.name).join(", ")}`
+      : "advance to spark reveal";
+  }
+
+  if (currentRoom.phase === "spark_reveal") {
+    return "advance to chat";
+  }
+
+  if (currentRoom.phase === "chat") {
+    return "conversation or manual advance to final statements";
+  }
+
+  if (currentRoom.phase === "final_statements") {
+    return missingFinal.length
+      ? `final statements from ${missingFinal.map((player) => player.name).join(", ")}`
+      : "advance to vote";
+  }
+
+  if (currentRoom.phase === "vote") {
+    return missingVotes.length
+      ? `votes from ${missingVotes.map((player) => player.name).join(", ")}`
+      : "advance to reveal";
+  }
+
+  if (currentRoom.phase === "reveal") {
+    return "advance to next round or game over";
+  }
+
+  if (currentRoom.phase === "game_over") {
+    return "reset room";
+  }
+
+  return "unknown";
+}
+
 function getLocalNetworkUrls(port) {
+  if (HOST !== "0.0.0.0" && HOST !== "::") {
+    return [];
+  }
+
   const interfaces = os.networkInterfaces();
   const urls = [];
 
@@ -231,14 +381,18 @@ function getLocalNetworkUrls(port) {
 }
 
 server.listen(PORT, HOST, () => {
-  console.log(`Game prototype running locally at http://localhost:${PORT}`);
+  logger.info("server started", { host: HOST, port: PORT });
+  logger.info("local url", { url: `http://localhost:${PORT}` });
 
   const networkUrls = getLocalNetworkUrls(PORT);
 
   if (networkUrls.length) {
-    console.log("Local network URLs:");
-    networkUrls.forEach((url) => console.log(`  ${url}`));
+    networkUrls.forEach((url) => logger.info("network url", { url }));
+  } else if (HOST !== "0.0.0.0" && HOST !== "::") {
+    logger.info("network access disabled", { host: HOST, hint: "Use HOST=0.0.0.0 for LAN testing." });
   } else {
-    console.log("No local network IP detected. Check your Wi-Fi/Ethernet connection.");
+    logger.warn("no local network ip detected", { hint: "Check Wi-Fi/Ethernet connection." });
   }
+
+  logger.info("waiting", { for: describeWaitingFor(room) });
 });

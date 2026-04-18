@@ -123,3 +123,38 @@ lobby
 ```
 
 Use the `Advance` button to move between phases while testing.
+
+## Server Logs
+
+The server is intentionally verbose while prototyping. The terminal shows:
+
+- HTTP requests
+- SSE client connects/disconnects
+- Submitted actions
+- Accepted/rejected actions
+- Phase changes
+- Mock agent scheduling
+- Mock agent actions
+- State broadcasts
+- What the room is currently waiting for
+
+Example:
+
+```text
+[11:58:04] INFO  phase changed from=lobby to=spark round=1 waitingFor=spark answers from Alice, Ben, Mara, Jules, Theo, Nia
+[11:58:05] INFO  action accepted type=SUBMIT_SPARK actor=Mara/ai/alive before=phase=spark round=1 players=6 alive=6 humansAlive=2 after=phase=spark round=1 players=6 alive=6 humansAlive=2
+[11:58:06] INFO  waiting for=spark answers from Alice, Ben
+```
+
+To reduce noise:
+
+```bash
+$env:LOG_LEVEL="info"; npm start
+```
+
+Available levels:
+
+- `debug`
+- `info`
+- `warn`
+- `error`
