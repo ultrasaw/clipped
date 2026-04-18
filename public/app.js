@@ -1,3 +1,13 @@
+const roomsScreen = document.querySelector("#roomsScreen");
+const gameShell = document.querySelector("#gameShell");
+const roomsList = document.querySelector("#roomsList");
+const refreshRoomsButton = document.querySelector("#refreshRoomsButton");
+const createRoomForm = document.querySelector("#createRoomForm");
+const roomNameInput = document.querySelector("#roomNameInput");
+const humansRequiredInput = document.querySelector("#humansRequiredInput");
+const maxRoundsInput = document.querySelector("#maxRoundsInput");
+const chatDurationInput = document.querySelector("#chatDurationInput");
+const roomLabel = document.querySelector("#roomLabel");
 const phaseTitle = document.querySelector("#phaseTitle");
 const phaseMeta = document.querySelector("#phaseMeta");
 const connectionStatus = document.querySelector("#connectionStatus");
@@ -29,11 +39,20 @@ const resultsDetails = document.querySelector("#resultsDetails");
 
 let state = null;
 let events = null;
-let playerId = localStorage.getItem("clipped:playerId");
+let currentRoomId = getRoomIdFromLocation();
+let playerId = currentRoomId ? localStorage.getItem(getPlayerStorageKey()) : null;
 const isDevMode = new URLSearchParams(window.location.search).get("dev") === "1";
 
 nameInput.value = localStorage.getItem("clipped:name") || "";
 document.body.classList.toggle("dev-mode", isDevMode);
+
+if (currentRoomId) {
+  roomsScreen.classList.add("hidden");
+  gameShell.classList.remove("hidden");
+} else {
+  roomsScreen.classList.remove("hidden");
+  gameShell.classList.add("hidden");
+}
 
 const phaseLabels = {
   lobby: "Lobby",
@@ -102,12 +121,16 @@ const phaseCopy = {
 };
 
 function connectEvents() {
+  if (!currentRoomId) {
+    return;
+  }
+
   if (events) {
     events.close();
   }
 
   const query = playerId ? `?playerId=${encodeURIComponent(playerId)}` : "";
-  events = new EventSource(`/events${query}`);
+  events = new EventSource(`/api/rooms/${encodeURIComponent(currentRoomId)}/events${query}`);
 
   events.addEventListener("open", () => {
     setConnectionStatus("Connected", true);
@@ -218,6 +241,7 @@ function renderState() {
   document.documentElement.dataset.screen = getScreen();
   document.documentElement.dataset.phase = state.phase;
   renderScreens();
+  roomLabel.textContent = state.name || "Room";
   phaseTitle.textContent = `${label}${state.round ? ` / Round ${state.round}` : ""}`;
   phaseMeta.textContent = state.result
     ? state.result.summary
@@ -560,7 +584,7 @@ function getActionLabel(defaultLabel) {
 }
 
 async function postAction(action) {
-  const response = await fetch("/actions", {
+  const response = await fetch(`/api/rooms/${encodeURIComponent(currentRoomId)}/actions`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -591,6 +615,85 @@ function escapeHtml(value) {
   });
 }
 
+function getRoomIdFromLocation() {
+  const pathMatch = window.location.pathname.match(/^\/rooms\/([^/]+)$/);
+
+  if (pathMatch) {
+    return decodeURIComponent(pathMatch[1]);
+  }
+
+  return new URLSearchParams(window.location.search).get("room");
+}
+
+function getPlayerStorageKey() {
+  return `clipped:room:${currentRoomId}:playerId`;
+}
+
+async function loadRooms() {
+  const response = await fetch("/api/rooms");
+  const payload = await response.json();
+
+  if (!payload.ok) {
+    roomsList.innerHTML = `<p>Could not load rooms.</p>`;
+    return;
+  }
+
+  renderRooms(payload.rooms);
+}
+
+function renderRooms(rooms) {
+  if (!rooms.length) {
+    roomsList.innerHTML = "<p>No rooms yet. Create the first one.</p>";
+    return;
+  }
+
+  roomsList.innerHTML = rooms
+    .map(
+      (room) => `
+        <a class="room-card" href="/rooms/${encodeURIComponent(room.id)}">
+          <div>
+            <h3>${escapeHtml(room.name)}</h3>
+            <div class="room-meta">
+              <span class="room-pill">${escapeHtml(phaseLabels[room.phase] || room.phase)}</span>
+              <span class="room-pill">${room.humansJoined}/${room.humansRequired} humans</span>
+              <span class="room-pill">Round ${room.round}/${room.maxRounds}</span>
+              <span class="room-pill">${room.chatDurationSeconds}s chat</span>
+            </div>
+          </div>
+          <span class="room-action">${room.canJoin ? "Join" : "Watch"}</span>
+        </a>
+      `,
+    )
+    .join("");
+}
+
+async function createRoom(event) {
+  event.preventDefault();
+
+  const response = await fetch("/api/rooms", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      name: roomNameInput.value.trim() || "New Room",
+      config: {
+        humansRequired: humansRequiredInput.value,
+        maxRounds: maxRoundsInput.value,
+        chatDurationSeconds: chatDurationInput.value,
+      },
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok || !payload.ok) {
+    window.alert(payload.error || "Could not create room.");
+    return;
+  }
+
+  window.location.href = `/rooms/${encodeURIComponent(payload.room.id)}`;
+}
+
 joinForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
@@ -609,7 +712,7 @@ joinForm.addEventListener("submit", async (event) => {
 
   if (result.ok && result.playerId) {
     playerId = result.playerId;
-    localStorage.setItem("clipped:playerId", playerId);
+    localStorage.setItem(getPlayerStorageKey(), playerId);
     connectEvents();
   }
 });
@@ -619,16 +722,16 @@ advanceButton.addEventListener("click", () => {
 });
 
 resetButton.addEventListener("click", async () => {
-  localStorage.removeItem("clipped:playerId");
+  localStorage.removeItem(getPlayerStorageKey());
   playerId = null;
-  await postAction({ type: "RESET_ROOM" });
+  await fetch(`/api/rooms/${encodeURIComponent(currentRoomId)}/admin/reset`, { method: "POST" });
   connectEvents();
 });
 
 resultsResetButton.addEventListener("click", async () => {
-  localStorage.removeItem("clipped:playerId");
+  localStorage.removeItem(getPlayerStorageKey());
   playerId = null;
-  await postAction({ type: "RESET_ROOM" });
+  await fetch(`/api/rooms/${encodeURIComponent(currentRoomId)}/admin/reset`, { method: "POST" });
   connectEvents();
 });
 
@@ -664,7 +767,16 @@ votePanel.addEventListener("click", (event) => {
   });
 });
 
-connectEvents();
+refreshRoomsButton.addEventListener("click", loadRooms);
+createRoomForm.addEventListener("submit", createRoom);
+
+if (currentRoomId) {
+  connectEvents();
+} else {
+  document.body.dataset.screen = "rooms";
+  document.documentElement.dataset.screen = "rooms";
+  loadRooms();
+}
 
 setInterval(() => {
   if (!state) {

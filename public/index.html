@@ -3,12 +3,56 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="light only" />
+    <meta name="color-scheme" content="dark only" />
     <title>Clipped Game Prototype</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <main class="shell">
+    <main id="roomsScreen" class="rooms-shell hidden" aria-label="Rooms">
+      <section class="rooms-hero">
+        <p class="eyebrow">Clipped Prototype</p>
+        <h1>Find a room, then find the human.</h1>
+        <p class="lede">
+          Join an existing game room or create a fresh one for your team.
+        </p>
+      </section>
+
+      <section class="rooms-card">
+        <div class="rooms-heading">
+          <div>
+            <p class="eyebrow">Rooms</p>
+            <h2>Open Rooms</h2>
+          </div>
+          <button id="refreshRoomsButton" type="button" class="secondary">Refresh</button>
+        </div>
+        <div id="roomsList" class="rooms-list" aria-live="polite"></div>
+
+        <form id="createRoomForm" class="create-room-form">
+          <p class="eyebrow">Create Room</p>
+          <label class="field">
+            <span>Room Name</span>
+            <input id="roomNameInput" name="roomName" maxlength="40" placeholder="Friday playtest" />
+          </label>
+          <div class="config-grid">
+            <label class="field">
+              <span>Humans</span>
+              <input id="humansRequiredInput" name="humansRequired" type="number" min="1" max="6" value="2" />
+            </label>
+            <label class="field">
+              <span>Rounds</span>
+              <input id="maxRoundsInput" name="maxRounds" type="number" min="1" max="8" value="3" />
+            </label>
+            <label class="field">
+              <span>Chat Seconds</span>
+              <input id="chatDurationInput" name="chatDuration" type="number" min="20" max="600" value="120" />
+            </label>
+          </div>
+          <button type="submit">Create Room</button>
+        </form>
+      </section>
+    </main>
+
+    <main id="gameShell" class="shell hidden">
       <section class="hero">
         <p class="eyebrow">Clipped Prototype</p>
         <h1>Find the real voice in the room.</h1>
@@ -26,7 +70,7 @@
       <section class="game-card" aria-label="Game room">
         <header class="game-header">
           <div>
-            <p class="eyebrow">Demo Room</p>
+            <p id="roomLabel" class="eyebrow">Demo Room</p>
             <h2 id="phaseTitle">Connecting</h2>
             <p id="phaseMeta" class="phase-meta">Waiting for state...</p>
           </div>
