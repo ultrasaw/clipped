@@ -143,6 +143,14 @@ async function applyAndBroadcast(runtime, action, context = {}) {
   } else if (result.ok) {
     runtime.agentManager.handleActionAccepted(room, action);
 
+    if (action.type === "SEND_CHAT" && room.phase === "chat") {
+      const latestMessage = room.messages[room.messages.length - 1];
+
+      if (latestMessage?.kind === "chat") {
+        runtime.agentManager.handleChatActivity(room, latestMessage);
+      }
+    }
+
     if (action.type === "RESET_ROOM") {
       clearPhaseTimer(runtime);
       clearScheduledAdvance(runtime);
@@ -332,6 +340,14 @@ function normalizeAction(action, playerId) {
       type: "SEND_CHAT",
       playerId,
       text: action.text,
+    };
+  }
+
+  if (action.type === "SET_TYPING") {
+    return {
+      type: "SET_TYPING",
+      playerId,
+      isTyping: Boolean(action.isTyping),
     };
   }
 

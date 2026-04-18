@@ -19,6 +19,7 @@ function getPublicState(room, viewerPlayerId = null) {
     phaseStartedAt: room.phaseStartedAt,
     phaseEndsAt: room.phaseEndsAt,
     tiebreakPlayerIds: room.tiebreakPlayerIds,
+    typingPlayerIds: room.typingPlayerIds,
     players: room.players.map((player) => ({
       id: player.id,
       name: player.name,
@@ -33,7 +34,7 @@ function getPublicState(room, viewerPlayerId = null) {
           role: viewer.role,
           briefing:
             viewer.role === "human"
-              ? "You are human. There is one other human in the room. Find them and survive together."
+              ? "Not everyone here is human. Survive the vote."
               : null,
           submissions: {
             spark: Boolean(room.sparkAnswers[viewer.id]),
@@ -45,6 +46,7 @@ function getPublicState(room, viewerPlayerId = null) {
         }
       : null,
     messages: room.messages,
+    sparkAnswerPlayerIds: Object.keys(room.sparkAnswers),
     sparkAnswers: room.phase === "spark" ? {} : room.sparkAnswers,
     finalStatements: room.phase === "final_statements" ? {} : room.finalStatements,
     tiebreakStatements: room.phase === "tiebreak_statements" ? {} : room.tiebreakStatements,

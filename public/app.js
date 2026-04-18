@@ -29,6 +29,7 @@ const phasePanel = document.querySelector("#phasePanel");
 const sparkPanel = document.querySelector("#sparkPanel");
 const votePanel = document.querySelector("#votePanel");
 const messagesEl = document.querySelector("#messages");
+const typingIndicatorEl = document.querySelector("#typingIndicator");
 const actionForm = document.querySelector("#actionForm");
 const actionLabel = document.querySelector("#actionLabel");
 const actionInput = document.querySelector("#actionInput");
@@ -42,6 +43,8 @@ let events = null;
 let currentRoomId = getRoomIdFromLocation();
 let playerId = currentRoomId ? localStorage.getItem(getPlayerStorageKey()) : null;
 const isDevMode = new URLSearchParams(window.location.search).get("dev") === "1";
+let typingIdleTimer = null;
+let sentTyping = false;
 
 nameInput.value = localStorage.getItem("clipped:name") || "";
 document.body.classList.toggle("dev-mode", isDevMode);
@@ -264,6 +267,7 @@ function renderState() {
   renderPhasePanel();
   renderSpark();
   renderMessages();
+  renderTypingIndicator();
   renderVote();
   renderActionForm();
 
@@ -463,7 +467,11 @@ function renderPlayers() {
 }
 
 function renderSpark() {
-  if (!state.sparkPrompt && Object.keys(state.sparkAnswers).length === 0) {
+  const sparkPlayers = state.players.filter((player) => player.status === "alive");
+  const answeredPlayerIds = new Set(state.sparkAnswerPlayerIds || Object.keys(state.sparkAnswers || {}));
+  const isRevealPhase = state.phase !== "spark";
+
+  if (!state.sparkPrompt && !sparkPlayers.length) {
     sparkPanel.classList.add("hidden");
     sparkPanel.innerHTML = "";
     return;
@@ -471,13 +479,25 @@ function renderSpark() {
 
   sparkPanel.classList.remove("hidden");
 
-  const answers = Object.entries(state.sparkAnswers)
-    .map(([id, answer]) => {
-      const player = state.players.find((candidate) => candidate.id === id);
+  const answers = sparkPlayers
+    .map((player) => {
+      const answer = state.sparkAnswers?.[player.id];
+      const hasAnswered = answeredPlayerIds.has(player.id);
+      const answerMarkup = isRevealPhase
+        ? `<strong>${escapeHtml(answer || "No answer submitted")}</strong>`
+        : hasAnswered
+          ? `
+            <div class="spark-answer-ghost" aria-label="${escapeHtml(player.name)} has answered">
+              <span></span>
+              <span></span>
+            </div>
+          `
+          : `<em class="spark-answer-pending">Waiting...</em>`;
+
       return `
-        <article class="spark-answer-card">
-          <span>${escapeHtml(player ? player.name : "Unknown")}</span>
-          <strong>${escapeHtml(answer)}</strong>
+        <article class="spark-answer-card ${hasAnswered ? "answered" : "pending"}">
+          <span>${escapeHtml(player.name)}</span>
+          ${answerMarkup}
         </article>
       `;
     })
@@ -489,7 +509,7 @@ function renderSpark() {
       <h3>${escapeHtml(state.sparkPrompt || "Spark answers")}</h3>
     </div>
     <div class="spark-answers">
-      ${answers ? answers : "<p>Answers are hidden until reveal.</p>"}
+      ${answers || "<p>Answers are hidden until reveal.</p>"}
     </div>
   `;
 }
@@ -523,6 +543,30 @@ function renderMessages() {
   }
 
   messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function renderTypingIndicator() {
+  const typingPlayers = (state.typingPlayerIds || [])
+    .map((id) => state.players.find((player) => player.id === id))
+    .filter(Boolean)
+    .filter((player) => !player.isYou);
+
+  if (!typingPlayers.length || !["chat", "final_statements", "tiebreak_statements"].includes(state.phase)) {
+    typingIndicatorEl.classList.add("hidden");
+    typingIndicatorEl.textContent = "";
+    return;
+  }
+
+  const names = typingPlayers.map((player) => player.name);
+  const label =
+    names.length === 1
+      ? `${names[0]} is typing...`
+      : names.length === 2
+        ? `${names[0]} and ${names[1]} are typing...`
+        : `${names.slice(0, -1).join(", ")}, and ${names.at(-1)} are typing...`;
+
+  typingIndicatorEl.classList.remove("hidden");
+  typingIndicatorEl.textContent = label;
 }
 
 function renderVote() {
@@ -597,6 +641,13 @@ function renderActionForm() {
   actionInput.disabled = !canAct;
   sendButton.disabled = !canAct;
   sendButton.textContent = alreadySubmitted ? "Waiting" : config.button;
+
+  if (state.phase !== "chat" && sentTyping) {
+    if (typingIdleTimer) {
+      clearTimeout(typingIdleTimer);
+    }
+    postTyping(false);
+  }
 }
 
 function getActionLabel(defaultLabel) {
@@ -631,6 +682,47 @@ async function postAction(action) {
   }
 
   return payload;
+}
+
+async function postTyping(isTyping) {
+  if (!currentRoomId || !playerId) {
+    return;
+  }
+
+  if (sentTyping === isTyping) {
+    return;
+  }
+
+  const previousValue = sentTyping;
+  sentTyping = isTyping;
+
+  try {
+    await fetch(`/api/rooms/${encodeURIComponent(currentRoomId)}/actions`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        playerId,
+        action: {
+          type: "SET_TYPING",
+          isTyping,
+        },
+      }),
+    });
+  } catch (_error) {
+    sentTyping = previousValue;
+  }
+}
+
+function queueTypingStop() {
+  if (typingIdleTimer) {
+    clearTimeout(typingIdleTimer);
+  }
+
+  typingIdleTimer = setTimeout(() => {
+    postTyping(false);
+  }, 900);
 }
 
 function escapeHtml(value) {
@@ -779,11 +871,32 @@ actionForm.addEventListener("submit", (event) => {
 
   actionInput.value = "";
   actionInput.focus();
+  if (typingIdleTimer) {
+    clearTimeout(typingIdleTimer);
+  }
+  postTyping(false);
 
   postAction({
     type: config.type,
     text,
   });
+});
+
+actionInput.addEventListener("input", () => {
+  if (!state?.viewer || state.phase !== "chat") {
+    return;
+  }
+
+  if (!actionInput.value.trim()) {
+    if (typingIdleTimer) {
+      clearTimeout(typingIdleTimer);
+    }
+    postTyping(false);
+    return;
+  }
+
+  postTyping(true);
+  queueTypingStop();
 });
 
 votePanel.addEventListener("click", (event) => {

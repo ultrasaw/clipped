@@ -111,6 +111,10 @@ function createAgentFactory() {
   });
 }
 
+function getNonTypingActions(submitted) {
+  return submitted.filter((action) => action.type !== "SET_TYPING");
+}
+
 test("all spark AIs wait for both human spark answers before replying", async () => {
   const timers = createFakeTimers();
   const submitted = [];
@@ -129,19 +133,19 @@ test("all spark AIs wait for both human spark answers before replying", async ()
 
   manager.handlePhaseEntered(room);
   await timers.advance(getFallbackDelayMs(room) - 1);
-  assert.equal(submitted.length, 0);
+  assert.equal(getNonTypingActions(submitted).length, 0);
 
   room.sparkAnswers.h1 = "ramen";
   manager.handleActionAccepted(room, { type: "SUBMIT_SPARK", playerId: "h1", text: "ramen" });
-  assert.equal(submitted.length, 0);
+  assert.equal(getNonTypingActions(submitted).length, 0);
 
   room.sparkAnswers.h2 = "soba";
   manager.handleActionAccepted(room, { type: "SUBMIT_SPARK", playerId: "h2", text: "soba" });
   await timers.advance(2_000);
 
-  assert.equal(submitted.length, 4);
+  assert.equal(getNonTypingActions(submitted).length, 4);
   assert.deepEqual(
-    submitted.map((action) => action.type),
+    getNonTypingActions(submitted).map((action) => action.type),
     ["SUBMIT_SPARK", "SUBMIT_SPARK", "SUBMIT_SPARK", "SUBMIT_SPARK"],
   );
 });
@@ -163,28 +167,28 @@ test("chat phase releases proactive personas early and reactive personas after b
   });
 
   manager.handlePhaseEntered(room);
-  await timers.advance(5_000);
+  await timers.advance(10_000);
 
   assert.deepEqual(
-    submitted.map((action) => action.playerId),
+    getNonTypingActions(submitted).map((action) => action.playerId),
     ["ai_2", "ai_3"],
   );
 
   room.messages.push({ id: "m1", playerId: "h1", sender: "Ava", text: "first", kind: "chat", createdAt: 2_000 });
   manager.handleActionAccepted(room, { type: "SEND_CHAT", playerId: "h1", text: "first" });
-  await timers.advance(3_000);
+  await timers.advance(6_000);
   assert.deepEqual(
-    submitted.map((action) => action.playerId),
+    getNonTypingActions(submitted).map((action) => action.playerId),
     ["ai_2", "ai_3"],
   );
 
   room.messages.push({ id: "m2", playerId: "h2", sender: "Bea", text: "second", kind: "chat", createdAt: 3_000 });
   manager.handleActionAccepted(room, { type: "SEND_CHAT", playerId: "h2", text: "second" });
-  await timers.advance(2_000);
+  await timers.advance(8_000);
 
   assert.deepEqual(
-    submitted.map((action) => action.playerId),
-    ["ai_2", "ai_3", "ai_1", "ai_4"],
+    [...getNonTypingActions(submitted).map((action) => action.playerId)].sort(),
+    ["ai_1", "ai_2", "ai_3", "ai_4"],
   );
 });
 
@@ -207,11 +211,11 @@ test("waiting personas fall back near the deadline if one human never replies", 
   });
 
   manager.handlePhaseEntered(room);
-  await timers.advance(getFallbackDelayMs(room) + 2_000);
+  await timers.advance(getFallbackDelayMs(room) + 8_000);
 
   const reactiveIds = AI_ROSTER.filter((profile) => profile.timingProfile === WAIT_FOR_BOTH_CURRENT_PHASE).map(
     (profile) => `ai_${AI_ROSTER.findIndex((entry) => entry.name === profile.name) + 1}`,
   );
 
-  assert.ok(submitted.some((action) => reactiveIds.includes(action.playerId)));
+  assert.ok(getNonTypingActions(submitted).some((action) => reactiveIds.includes(action.playerId)));
 });
