@@ -225,7 +225,7 @@ or:
 | Action | Who Uses It | Phase | Notes |
 | --- | --- | --- | --- |
 | `JOIN_ROOM` | Human client | `lobby` | Creates or refreshes a human player. |
-| `START_GAME` | Client/dev | `lobby` | Starts when enough humans have joined. |
+| `START_GAME` | Auto/dev | `lobby` | Starts automatically after both humans join. Dev mode can still advance from lobby. |
 | `ADVANCE_PHASE` | Dev/timer/auto | Any active phase | Hidden from normal UI unless `?dev=1`. |
 | `SUBMIT_SPARK` | Human/agent | `spark` | Short spark answer. |
 | `SEND_CHAT` | Human/agent | `chat` | Public chat message. |
@@ -274,6 +274,13 @@ lobby
 -> reveal
 -> next round or game_over
 ```
+
+Lobby start rule:
+
+- Once the required human players have joined, the server schedules a short
+  ready countdown.
+- When the countdown ends, the server starts the game automatically.
+- Normal players do not see or need a `Start` button.
 
 Tie flow:
 

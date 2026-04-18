@@ -5,6 +5,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { createDemoRoom, applyAction, addRoomEvent } = require("./src/game");
 const { createMockAgentManager } = require("./src/agents");
+const { GAME_CONFIG } = require("./src/gameConfig");
 const { getPublicState } = require("./src/publicState");
 const logger = require("./src/logger");
 
@@ -16,6 +17,7 @@ const clients = new Map();
 const room = createDemoRoom();
 let phaseTimer = null;
 let autoAdvanceTimer = null;
+let lobbyStartTimer = null;
 
 function sendJson(res, statusCode, payload) {
   const body = JSON.stringify(payload);
@@ -124,6 +126,13 @@ function applyAndBroadcast(action, context = {}) {
   if (result.ok && room.phase !== previousPhase) {
     handlePhaseChanged(previousPhase);
   } else if (result.ok) {
+    if (action.type === "RESET_ROOM") {
+      clearPhaseTimer();
+      clearScheduledAdvance();
+      clearLobbyStartTimer();
+    }
+
+    maybeScheduleLobbyStart(action);
     logger.info("waiting", { for: describeWaitingFor(room) });
     maybeScheduleAutoAdvance();
   }
@@ -132,6 +141,7 @@ function applyAndBroadcast(action, context = {}) {
 }
 
 function handlePhaseChanged(previousPhase) {
+  clearLobbyStartTimer();
   clearScheduledAdvance();
   logger.info("phase changed", {
     from: previousPhase,
@@ -318,6 +328,46 @@ function handleGetState(req, res, url) {
   const playerId = url.searchParams.get("playerId") || null;
   logger.debug("state requested", { player: describeActor(room, playerId) });
   sendJson(res, 200, getPublicState(room, playerId));
+}
+
+function maybeScheduleLobbyStart(action) {
+  if (room.phase !== "lobby" || action.type !== "JOIN_ROOM" || lobbyStartTimer) {
+    return;
+  }
+
+  const humanCount = room.players.filter((player) => player.role === "human").length;
+
+  if (humanCount < GAME_CONFIG.players.humansRequired) {
+    return;
+  }
+
+  const delayMs = GAME_CONFIG.players.lobbyAutoStartDelay;
+  room.phaseStartedAt = Date.now();
+  room.phaseEndsAt = room.phaseStartedAt + delayMs;
+  addRoomEvent(room, "LOBBY_AUTOSTART_SCHEDULED", {
+    inMs: delayMs,
+    humanCount,
+  });
+  logger.info("lobby auto-start scheduled", { inMs: delayMs, humanCount });
+  broadcastState();
+
+  lobbyStartTimer = setTimeout(() => {
+    lobbyStartTimer = null;
+
+    if (room.phase !== "lobby") {
+      return;
+    }
+
+    logger.info("lobby auto-start triggered");
+    applyAndBroadcast({ type: "START_GAME" }, { source: "auto" });
+  }, delayMs);
+}
+
+function clearLobbyStartTimer() {
+  if (lobbyStartTimer) {
+    clearTimeout(lobbyStartTimer);
+    lobbyStartTimer = null;
+  }
 }
 
 function getHealthPayload() {
@@ -853,7 +903,11 @@ function describeWaitingFor(currentRoom) {
   const humanCount = currentRoom.players.filter((player) => player.role === "human").length;
 
   if (currentRoom.phase === "lobby") {
-    return humanCount < 2 ? `${2 - humanCount} more human player(s) to join` : "game start";
+    if (humanCount < GAME_CONFIG.players.humansRequired) {
+      return `${GAME_CONFIG.players.humansRequired - humanCount} more human player(s) to join`;
+    }
+
+    return currentRoom.phaseEndsAt ? "game starts soon" : "game start";
   }
 
   if (currentRoom.phase === "spark") {

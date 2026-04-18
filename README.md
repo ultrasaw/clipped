@@ -21,8 +21,8 @@ Then open:
 http://localhost:3000
 ```
 
-Open the page in two browser tabs, join with two different names, then start the
-demo game.
+Open the page in two browser tabs and join with two different names. The game
+starts automatically after a short countdown once both humans have joined.
 
 ## Test On Your Local Network
 

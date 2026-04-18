@@ -2,13 +2,20 @@ const phaseTitle = document.querySelector("#phaseTitle");
 const phaseMeta = document.querySelector("#phaseMeta");
 const connectionStatus = document.querySelector("#connectionStatus");
 const viewerBriefing = document.querySelector("#viewerBriefing");
+const lobbyScreen = document.querySelector("#lobbyScreen");
+const gameScreen = document.querySelector("#gameScreen");
+const resultsScreen = document.querySelector("#resultsScreen");
+const lobbyTitle = document.querySelector("#lobbyTitle");
+const lobbyDescription = document.querySelector("#lobbyDescription");
+const lobbyCountdown = document.querySelector("#lobbyCountdown");
 const joinForm = document.querySelector("#joinForm");
 const nameInput = document.querySelector("#nameInput");
-const startButton = document.querySelector("#startButton");
 const advanceButton = document.querySelector("#advanceButton");
 const resetButton = document.querySelector("#resetButton");
+const resultsResetButton = document.querySelector("#resultsResetButton");
 const playersEl = document.querySelector("#players");
 const playerCount = document.querySelector("#playerCount");
+const phasePanel = document.querySelector("#phasePanel");
 const sparkPanel = document.querySelector("#sparkPanel");
 const votePanel = document.querySelector("#votePanel");
 const messagesEl = document.querySelector("#messages");
@@ -16,6 +23,9 @@ const actionForm = document.querySelector("#actionForm");
 const actionLabel = document.querySelector("#actionLabel");
 const actionInput = document.querySelector("#actionInput");
 const sendButton = document.querySelector("#sendButton");
+const resultsTitle = document.querySelector("#resultsTitle");
+const resultsSummary = document.querySelector("#resultsSummary");
+const resultsDetails = document.querySelector("#resultsDetails");
 
 let state = null;
 let events = null;
@@ -36,6 +46,59 @@ const phaseLabels = {
   tiebreak_vote: "Tiebreak Vote",
   reveal: "Reveal",
   game_over: "Game Over",
+};
+
+const phaseCopy = {
+  lobby: {
+    kicker: "Gathering the room",
+    title: "Waiting for the room",
+    instruction: "Join with a name. Once two humans are in, the game starts automatically.",
+  },
+  spark: {
+    kicker: "Quick instinct",
+    title: "Answer the spark",
+    instruction: "One short phrase is enough. Do not overthink it.",
+  },
+  spark_reveal: {
+    kicker: "First evidence",
+    title: "Spark answers revealed",
+    instruction: "Read the room. These answers are just the first clues.",
+  },
+  chat: {
+    kicker: "Open conversation",
+    title: "Talk, test, accuse",
+    instruction: "Question others, defend yourself, or quietly look for the other human.",
+  },
+  final_statements: {
+    kicker: "Commit",
+    title: "Final statements",
+    instruction: "Give one read, defense, or accusation before the vote.",
+  },
+  vote: {
+    kicker: "Elimination",
+    title: "Vote someone out",
+    instruction: "Pick whoever feels least convincingly human.",
+  },
+  tiebreak_statements: {
+    kicker: "Tie",
+    title: "Tied players defend themselves",
+    instruction: "Only tied players speak now. Everyone else listens for the revote.",
+  },
+  tiebreak_vote: {
+    kicker: "Break the tie",
+    title: "Revote between tied players",
+    instruction: "Tied players cannot vote. If this ties again, all top-tied players are ejected.",
+  },
+  reveal: {
+    kicker: "Reveal",
+    title: "The room learns the truth",
+    instruction: "The ejected player is revealed. Watch what this changes.",
+  },
+  game_over: {
+    kicker: "Game over",
+    title: "The room has decided",
+    instruction: "Review the result and reset in dev mode when ready.",
+  },
 };
 
 function connectEvents() {
@@ -70,6 +133,19 @@ function formatTime(timestamp) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(timestamp));
+}
+
+function formatRemaining(timestamp) {
+  if (!timestamp) {
+    return "No timer";
+  }
+
+  const remainingMs = Math.max(0, timestamp - Date.now());
+  const totalSeconds = Math.ceil(remainingMs / 1000);
+  const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
+  const seconds = String(totalSeconds % 60).padStart(2, "0");
+
+  return `${minutes}:${seconds} remaining`;
 }
 
 function actionForPhase(phase) {
@@ -126,11 +202,12 @@ function renderState() {
   const viewer = state.viewer;
   const label = phaseLabels[state.phase] || state.phase;
 
+  renderScreens();
   phaseTitle.textContent = `${label}${state.round ? ` / Round ${state.round}` : ""}`;
   phaseMeta.textContent = state.result
     ? state.result.summary
     : state.phaseEndsAt
-      ? `Phase ends around ${formatTime(state.phaseEndsAt)}`
+      ? formatRemaining(state.phaseEndsAt)
       : "Waiting for players.";
 
   viewerBriefing.textContent = viewer
@@ -138,12 +215,140 @@ function renderState() {
     : "Join the lobby to receive your role briefing.";
 
   renderPlayers();
+  renderPhasePanel();
   renderSpark();
   renderMessages();
   renderVote();
   renderActionForm();
 
-  startButton.disabled = state.phase !== "lobby";
+}
+
+function getScreen() {
+  if (state.phase === "game_over") {
+    return "results";
+  }
+
+  if (state.phase === "lobby") {
+    return "lobby";
+  }
+
+  return "game";
+}
+
+function renderScreens() {
+  const screen = getScreen();
+
+  lobbyScreen.classList.toggle("hidden", screen !== "lobby");
+  gameScreen.classList.toggle("hidden", screen !== "game");
+  resultsScreen.classList.toggle("hidden", screen !== "results");
+
+  if (screen === "lobby") {
+    renderLobby();
+  }
+
+  if (screen === "results") {
+    renderResults();
+  }
+}
+
+function renderLobby() {
+  const humanPlayers = state.players.filter((player) => !player.revealedRole);
+  const joinedCount = humanPlayers.length;
+  const needed = Math.max(0, 2 - joinedCount);
+
+  if (state.phaseEndsAt) {
+    lobbyTitle.textContent = "Game starts soon";
+    lobbyDescription.textContent =
+      "Two humans are in. Get ready. The room will fill with AI voices when the countdown ends.";
+    renderLobbyCountdown();
+    return;
+  }
+
+  lobbyTitle.textContent = needed ? "Join the demo room" : "Ready to begin";
+  lobbyDescription.textContent = needed
+    ? `${needed} more human player${needed === 1 ? "" : "s"} needed before the countdown starts.`
+    : "The game will start automatically in a moment.";
+  lobbyCountdown.classList.add("hidden");
+  lobbyCountdown.innerHTML = "";
+}
+
+function renderLobbyCountdown() {
+  if (!state.phaseEndsAt) {
+    lobbyCountdown.classList.add("hidden");
+    lobbyCountdown.innerHTML = "";
+    return;
+  }
+
+  const remainingMs = Math.max(0, state.phaseEndsAt - Date.now());
+  const seconds = Math.ceil(remainingMs / 1000);
+
+  lobbyCountdown.classList.remove("hidden");
+  lobbyCountdown.innerHTML = `
+    <span>Starting in</span>
+    <strong>${String(seconds).padStart(2, "0")}</strong>
+    <span>seconds</span>
+  `;
+}
+
+function renderResults() {
+  const result = state.result;
+
+  resultsTitle.textContent = result ? result.summary : "Game over";
+  resultsSummary.textContent = result
+    ? `${result.winner.toUpperCase()} result / ${result.level} outcome`
+    : "The room has decided.";
+
+  const ejectedPlayers = state.players.filter((player) => player.status === "ejected");
+
+  resultsDetails.innerHTML = `
+    <p class="eyebrow">Eliminations</p>
+    ${
+      ejectedPlayers.length
+        ? `<ol>${ejectedPlayers
+            .map(
+              (player) =>
+                `<li><strong>${escapeHtml(player.name)}</strong> revealed as ${escapeHtml(
+                  player.revealedRole || "unknown",
+                )}</li>`,
+            )
+            .join("")}</ol>`
+        : "<p>No players were ejected.</p>"
+    }
+  `;
+}
+
+function renderPhasePanel() {
+  const copy = {
+    ...(phaseCopy[state.phase] || {
+      kicker: "Phase",
+      title: phaseLabels[state.phase] || state.phase,
+      instruction: "Follow the current room prompt.",
+    }),
+  };
+
+  if (state.phase === "lobby" && state.phaseEndsAt) {
+    copy.kicker = "Get ready";
+    copy.title = "Game starts soon";
+    copy.instruction = "Two humans are in. The room will fill with AI participants automatically.";
+  }
+
+  const tiedPlayers = state.players.filter((player) => state.tiebreakPlayerIds?.includes(player.id));
+  const tiedNames = tiedPlayers.map((player) => player.name).join(", ");
+  const timer = state.phaseEndsAt ? formatRemaining(state.phaseEndsAt) : "Manual / waiting";
+
+  phasePanel.innerHTML = `
+    <div>
+      <p class="eyebrow">${escapeHtml(copy.kicker)}</p>
+      <h3>${escapeHtml(copy.title)}</h3>
+      <p>${escapeHtml(copy.instruction)}</p>
+      ${
+        tiedNames
+          ? `<p class="phase-warning">Tied: ${escapeHtml(tiedNames)}</p>`
+          : ""
+      }
+    </div>
+    <span id="phaseTimer" class="timer-pill">${escapeHtml(timer)}</span>
+  `;
 }
 
 function renderPlayers() {
@@ -158,9 +363,12 @@ function renderPlayers() {
     item.className = "player";
     item.classList.toggle("ejected", player.status === "ejected");
     item.classList.toggle("you", player.isYou);
+    item.classList.toggle("tied", state.tiebreakPlayerIds?.includes(player.id));
 
     name.textContent = `${player.name}${player.isYou ? " (you)" : ""}`;
-    status.textContent = player.revealedRole || player.status;
+    status.textContent = state.tiebreakPlayerIds?.includes(player.id)
+      ? "TIED"
+      : player.revealedRole || player.status;
 
     item.append(name, status);
     playersEl.append(item);
@@ -284,7 +492,7 @@ function renderActionForm() {
     state.phase !== "tiebreak_statements" || state.tiebreakPlayerIds.includes(state.viewer?.id);
   const canAct = Boolean(state.viewer && config.enabled && !alreadySubmitted && isTiebreakStatementForViewer);
 
-  actionLabel.textContent = config.label;
+  actionLabel.textContent = getActionLabel(config.label);
   actionInput.placeholder = !isTiebreakStatementForViewer
     ? "Waiting for tied players..."
     : alreadySubmitted
@@ -293,6 +501,22 @@ function renderActionForm() {
   actionInput.disabled = !canAct;
   sendButton.disabled = !canAct;
   sendButton.textContent = alreadySubmitted ? "Waiting" : config.button;
+}
+
+function getActionLabel(defaultLabel) {
+  if (!state.viewer) {
+    return "Join first";
+  }
+
+  if (state.phase === "tiebreak_statements" && !state.tiebreakPlayerIds.includes(state.viewer.id)) {
+    return "Waiting for tied players";
+  }
+
+  if (state.phase === "tiebreak_vote" && state.tiebreakPlayerIds.includes(state.viewer.id)) {
+    return "The room is deciding";
+  }
+
+  return defaultLabel;
 }
 
 async function postAction(action) {
@@ -350,15 +574,18 @@ joinForm.addEventListener("submit", async (event) => {
   }
 });
 
-startButton.addEventListener("click", () => {
-  postAction({ type: "START_GAME" });
-});
-
 advanceButton.addEventListener("click", () => {
   postAction({ type: "ADVANCE_PHASE" });
 });
 
 resetButton.addEventListener("click", async () => {
+  localStorage.removeItem("clipped:playerId");
+  playerId = null;
+  await postAction({ type: "RESET_ROOM" });
+  connectEvents();
+});
+
+resultsResetButton.addEventListener("click", async () => {
   localStorage.removeItem("clipped:playerId");
   playerId = null;
   await postAction({ type: "RESET_ROOM" });
@@ -398,3 +625,25 @@ votePanel.addEventListener("click", (event) => {
 });
 
 connectEvents();
+
+setInterval(() => {
+  if (!state) {
+    return;
+  }
+
+  phaseMeta.textContent = state.result
+    ? state.result.summary
+    : state.phaseEndsAt
+      ? formatRemaining(state.phaseEndsAt)
+      : "Waiting for players.";
+
+  const timer = document.querySelector("#phaseTimer");
+
+  if (timer) {
+    timer.textContent = state.phaseEndsAt ? formatRemaining(state.phaseEndsAt) : "Manual / waiting";
+  }
+
+  if (state.phase === "lobby") {
+    renderLobbyCountdown();
+  }
+}, 1000);
