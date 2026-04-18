@@ -61,7 +61,6 @@ function createRuntime(options) {
     clients: new Map(),
     phaseTimer: null,
     autoAdvanceTimer: null,
-    lobbyStartTimer: null,
     cleanupTimer: null,
     agentManager: null,
   };
@@ -155,11 +154,9 @@ async function applyAndBroadcast(runtime, action, context = {}) {
     if (action.type === "RESET_ROOM") {
       clearPhaseTimer(runtime);
       clearScheduledAdvance(runtime);
-      clearLobbyStartTimer(runtime);
       clearCleanupTimer(runtime);
     }
 
-    maybeScheduleLobbyStart(runtime, action);
     logger.info("waiting", { for: describeWaitingFor(room) });
     maybeScheduleAutoAdvance(runtime);
   }
@@ -172,7 +169,6 @@ async function applyAndBroadcast(runtime, action, context = {}) {
 function handlePhaseChanged(runtime, previousPhase) {
   const { room } = runtime;
 
-  clearLobbyStartTimer(runtime);
   clearScheduledAdvance(runtime);
   logger.info("phase changed", {
     room: room.id,
@@ -444,51 +440,6 @@ function handleGetState(req, res, url, runtime) {
   const playerId = url.searchParams.get("playerId") || null;
   logger.debug("state requested", { player: describeActor(room, playerId) });
   sendJson(res, 200, getPublicState(room, playerId));
-}
-
-function maybeScheduleLobbyStart(runtime, action) {
-  const { room } = runtime;
-  const config = getRoomConfig(room);
-
-  if (room.phase !== "lobby" || action.type !== "JOIN_ROOM" || runtime.lobbyStartTimer) {
-    return;
-  }
-
-  const humanCount = room.players.filter((player) => player.role === "human").length;
-
-  if (humanCount < config.players.humansRequired) {
-    return;
-  }
-
-  const delayMs = config.players.lobbyAutoStartDelay;
-  room.phaseStartedAt = Date.now();
-  room.phaseEndsAt = room.phaseStartedAt + delayMs;
-  addRoomEvent(room, "LOBBY_AUTOSTART_SCHEDULED", {
-    inMs: delayMs,
-    humanCount,
-  });
-  logger.info("lobby auto-start scheduled", { inMs: delayMs, humanCount });
-  broadcastState(runtime);
-
-  runtime.lobbyStartTimer = setTimeout(() => {
-    runtime.lobbyStartTimer = null;
-
-    if (room.phase !== "lobby") {
-      return;
-    }
-
-    logger.info("lobby auto-start triggered");
-    applyAndBroadcast(runtime, { type: "START_GAME" }, { source: "auto" }).catch((error) => {
-      logger.error("lobby auto-start failed", { error: error.message || String(error) });
-    });
-  }, delayMs);
-}
-
-function clearLobbyStartTimer(runtime) {
-  if (runtime.lobbyStartTimer) {
-    clearTimeout(runtime.lobbyStartTimer);
-    runtime.lobbyStartTimer = null;
-  }
 }
 
 function getHealthPayload(runtime = null) {

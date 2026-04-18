@@ -37,7 +37,7 @@ function createDemoRoom(options = {}) {
         id: crypto.randomUUID(),
         playerId: "system",
         sender: "System",
-        text: "Welcome. Join with a name, then start the demo game when two humans are ready.",
+        text: "Welcome. Join with a name. The game starts as soon as enough humans are ready.",
         createdAt: Date.now(),
         kind: "system",
       },
@@ -669,6 +669,35 @@ function joinRoom(room, action, context) {
   return { ok: true, playerId: player.id };
 }
 
+async function joinRoomAndMaybeStart(room, action, context) {
+  const joinResult = joinRoom(room, action, context);
+
+  if (!joinResult.ok) {
+    return joinResult;
+  }
+
+  const config = getRoomConfig(room);
+  const humanCount = room.players.filter((player) => player.role === "human").length;
+
+  if (room.phase !== "lobby" || humanCount < config.players.humansRequired) {
+    return joinResult;
+  }
+
+  const startResult = await startGame(room);
+
+  if (!startResult.ok) {
+    return {
+      ...startResult,
+      playerId: joinResult.playerId,
+    };
+  }
+
+  return {
+    ...joinResult,
+    ...startResult,
+  };
+}
+
 function resetRoom(room) {
   const freshRoom = createDemoRoom({
     id: room.id,
@@ -716,7 +745,7 @@ function setTyping(room, playerId, isTyping) {
 async function applyAction(room, action, context = {}) {
   switch (action.type) {
     case "JOIN_ROOM":
-      return joinRoom(room, action, context);
+      return joinRoomAndMaybeStart(room, action, context);
 
     case "START_GAME":
       if (room.phase !== "lobby") {

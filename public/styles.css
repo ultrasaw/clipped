@@ -360,48 +360,12 @@ body[data-screen="game"] .game-card {
   line-height: 1.5;
 }
 
-.lobby-countdown {
-  display: grid;
-  gap: 0.75rem;
-  margin-top: 1.5rem;
-  border: 1px solid rgba(217, 93, 57, 0.25);
-  border-radius: 1.3rem;
-  padding: 1rem;
-  color: var(--accent);
-  background:
-    radial-gradient(circle at 20% 30%, rgba(217, 93, 57, 0.12), transparent 8rem),
-    rgba(28, 25, 20, 0.7);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
-  font-family: "Trebuchet MS", Verdana, sans-serif;
-  font-weight: 700;
-}
-
-.countdown-copy {
-  display: flex;
-  gap: 0.65rem;
-  align-items: baseline;
-}
-
-.lobby-countdown strong {
-  color: var(--ink);
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(2.4rem, 8vw, 4.2rem);
-  line-height: 0.85;
-  letter-spacing: -0.07em;
-}
-
-.countdown-track,
 .mini-timer-track {
   overflow: hidden;
   border-radius: 999px;
   background: rgba(255, 220, 170, 0.1);
 }
 
-.countdown-track {
-  height: 0.75rem;
-}
-
-.countdown-fill,
 .mini-timer-track span {
   display: block;
   width: 100%;
