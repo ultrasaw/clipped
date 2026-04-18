@@ -24,7 +24,7 @@ const AGENT_ACTION_TYPES = {
 };
 
 class BaseAgent {
-  constructor({ player, gameplayPrompt, personalityPrompt, memory = {} }) {
+  constructor({ player, gameplayPrompt, personalityPrompt, mimicStrategyPrompt = "", timingProfile = "", memory = {} }) {
     if (!player?.id) {
       throw new Error("Agent requires a player with an id.");
     }
@@ -32,6 +32,8 @@ class BaseAgent {
     this.player = player;
     this.gameplayPrompt = gameplayPrompt || "";
     this.personalityPrompt = personalityPrompt || "";
+    this.mimicStrategyPrompt = mimicStrategyPrompt || "";
+    this.timingProfile = timingProfile || "";
     this.memory = memory;
   }
 
@@ -59,9 +61,11 @@ class BaseAgent {
     const text = await answerQuestion(
       this.name,
       this.personalityPrompt,
+      this.mimicStrategyPrompt,
       context.game.sparkPrompt,
       this.gameplayPrompt,
       {
+        context,
         phase: context.game.phase,
         round: context.game.round,
       },
@@ -77,6 +81,7 @@ class BaseAgent {
     const text = await createChatMessage(
       this.name,
       this.personalityPrompt,
+      this.mimicStrategyPrompt,
       this.gameplayPrompt,
       context,
     );
@@ -91,6 +96,7 @@ class BaseAgent {
     const text = await createFinalStatement(
       this.name,
       this.personalityPrompt,
+      this.mimicStrategyPrompt,
       this.gameplayPrompt,
       context,
     );
@@ -109,6 +115,7 @@ class BaseAgent {
     const targetId = await chooseVoteTarget(
       this.name,
       this.personalityPrompt,
+      this.mimicStrategyPrompt,
       this.gameplayPrompt,
       context,
     );
@@ -127,6 +134,7 @@ class BaseAgent {
     const text = await createTiebreakStatement(
       this.name,
       this.personalityPrompt,
+      this.mimicStrategyPrompt,
       this.gameplayPrompt,
       context,
     );
@@ -149,6 +157,7 @@ class BaseAgent {
     const targetId = await chooseVoteTarget(
       this.name,
       this.personalityPrompt,
+      this.mimicStrategyPrompt,
       this.gameplayPrompt,
       context,
     );

@@ -1083,6 +1083,57 @@ body[data-result="humans-partial"] #resultsEyebrow {
   opacity: 0.7;
 }
 
+/* ── Spark answer states ─────────────────────────────────────────────────── */
+
+.spark-answer-card.answered {
+  border-color: rgba(45, 184, 122, 0.18);
+}
+
+.spark-answer-card.pending {
+  opacity: 0.8;
+}
+
+.spark-answer-ghost {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.spark-answer-ghost span,
+.spark-answer-pending {
+  display: block;
+  border-radius: 999px;
+}
+
+.spark-answer-ghost span {
+  height: 0.62rem;
+  background:
+    linear-gradient(90deg, rgba(255, 220, 170, 0.12), rgba(255, 220, 170, 0.28), rgba(255, 220, 170, 0.12));
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+.spark-answer-ghost span:first-child {
+  width: 84%;
+}
+
+.spark-answer-ghost span:last-child {
+  width: 62%;
+}
+
+.spark-answer-pending {
+  width: fit-content;
+  padding: 0.18rem 0.45rem;
+  color: var(--muted);
+  border: 1px solid rgba(255, 220, 170, 0.08);
+  background: rgba(30, 27, 22, 0.6);
+  font-family: "Trebuchet MS", Verdana, sans-serif;
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
 /* ── Hidden ──────────────────────────────────────────────────────────────── */
 
 .hidden {
@@ -1102,6 +1153,25 @@ body[data-result="humans-partial"] #resultsEyebrow {
     radial-gradient(circle at 18% 18%, rgba(217, 93, 57, 0.04), transparent 18rem),
     linear-gradient(180deg, rgba(0, 0, 0, 0.15), transparent 14rem);
   overscroll-behavior: contain;
+}
+
+.typing-indicator {
+  min-height: 1.35rem;
+  padding: 0 1.25rem 0.8rem;
+  color: var(--muted);
+  font-family: "Trebuchet MS", Verdana, sans-serif;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+
+  to {
+    background-position: -200% 0;
+  }
 }
 
 .message {
