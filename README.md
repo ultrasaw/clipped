@@ -1,6 +1,6 @@
 # Clipped
 
-https://clipper.chat
+https://clipped.chat
 
 Clipped is a browser-based social deduction prototype. Human players try to
 find each other inside a room filled with AI contestants that are trying to
