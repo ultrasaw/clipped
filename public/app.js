@@ -417,6 +417,7 @@ function renderPlayers() {
     item.classList.toggle("ejected", player.status === "ejected");
     item.classList.toggle("you", player.isYou);
     item.classList.toggle("tied", state.tiebreakPlayerIds?.includes(player.id));
+    if (player.revealedRole) item.dataset.revealedRole = player.revealedRole.toLowerCase();
     name.className = "player-name";
     status.className = "player-status";
 
@@ -791,13 +792,16 @@ setInterval(() => {
 
   const timer = document.querySelector("#phaseTimer");
   const timerFill = document.querySelector("#phaseTimerFill");
+  const isUrgent = Boolean(state.phaseEndsAt && state.phaseEndsAt - Date.now() < 10_000);
 
   if (timer) {
     timer.textContent = state.phaseEndsAt ? formatRemaining(state.phaseEndsAt) : "Manual / waiting";
+    timer.classList.toggle("urgent", isUrgent);
   }
 
   if (timerFill) {
     timerFill.style.width = `${getTimerProgress()}%`;
+    timerFill.classList.toggle("urgent", isUrgent);
   }
 
   if (state.phase === "lobby") {
