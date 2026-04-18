@@ -60,14 +60,8 @@ jobs:
           chmod 600 "$HOME/.kube/config"
 
       - name: Apply manifests
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           kubectl apply -f k8s/namespace.yaml
-          kubectl create secret generic openai-api \
-            --namespace clipped \
-            --from-literal=OPENAI_API_KEY="$OPENAI_API_KEY" \
-            --dry-run=client -o yaml | kubectl apply -f -
           kubectl apply -f k8s/cluster-issuer.yaml
           kubectl apply -f k8s/service.yaml
           kubectl apply -f k8s/ingress.yaml
