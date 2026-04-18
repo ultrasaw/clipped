@@ -473,8 +473,9 @@ function createMockAgentManager({
       );
 
       const remainingMs = Math.max((room.phaseEndsAt || Infinity) - Date.now(), 0);
+      const cappedSendDelayMs = Math.min(sendDelayMs, 3000 + randomInt(200, 800));
       const maxSendDelayMs = Math.max(remainingMs - 1500, 300);
-      const clampedSendDelayMs = Math.min(sendDelayMs, maxSendDelayMs);
+      const clampedSendDelayMs = Math.min(cappedSendDelayMs, maxSendDelayMs);
       const clampedPreTypingDelayMs = Math.min(preTypingDelayMs, Math.max(clampedSendDelayMs - 200, 100));
 
       logger?.info("agent response timing", {
