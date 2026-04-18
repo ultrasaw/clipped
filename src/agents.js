@@ -29,8 +29,8 @@ const FINAL_TEMPLATES = [
   "If I am wrong, fine, but {target} is my best read.",
 ];
 
-function createAiPlayers(startIndex = 0) {
-  return AI_NAMES.map((name, index) => ({
+function createAiPlayers(startIndex = 0, count = AI_NAMES.length) {
+  return AI_NAMES.slice(0, count).map((name, index) => ({
     id: `ai_${index + startIndex + 1}`,
     name,
     role: "ai",

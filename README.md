@@ -89,6 +89,7 @@ Browser UI
 Important files:
 
 - `server.js`: HTTP server, static files, SSE, action routing
+- `src/gameConfig.js`: shared tuning values for player counts, phase durations, and text limits
 - `src/game.js`: room state, phases, validation, voting, win resolution
 - `src/agents.js`: mock AI players and scheduled agent actions
 - `src/agentContract.js`: compatibility contract for future agents

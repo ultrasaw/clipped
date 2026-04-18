@@ -1,5 +1,6 @@
 const crypto = require("node:crypto");
 const { createAiPlayers } = require("./agents");
+const { GAME_CONFIG } = require("./gameConfig");
 
 const PHASES = [
   "lobby",
@@ -20,23 +21,12 @@ const SPARK_PROMPTS = [
   "Say one habit you have.",
 ];
 
-const PHASE_DURATIONS = {
-  lobby: null,
-  spark: 30_000,
-  spark_reveal: 8_000,
-  chat: 120_000,
-  final_statements: 35_000,
-  vote: 30_000,
-  reveal: 10_000,
-  game_over: null,
-};
-
 function createDemoRoom() {
   return {
     id: "demo",
     phase: "lobby",
     round: 0,
-    maxRounds: 3,
+    maxRounds: GAME_CONFIG.rounds.maxRounds,
     players: [],
     messages: [
       {
@@ -66,7 +56,7 @@ function createDemoRoom() {
 function createHumanPlayer(name, connectionId = null) {
   return {
     id: crypto.randomUUID(),
-    name: cleanText(name, 24),
+    name: cleanText(name, GAME_CONFIG.textLimits.playerName),
     role: "human",
     status: "alive",
     connectionId,
@@ -106,7 +96,7 @@ function addPlayerMessage(room, player, text, kind = "chat") {
     kind,
   });
 
-  if (room.messages.length > 200) {
+  if (room.messages.length > GAME_CONFIG.textLimits.maxStoredMessages) {
     room.messages.shift();
   }
 }
@@ -118,7 +108,9 @@ function pickSparkPrompt() {
 function enterPhase(room, nextPhase) {
   room.phase = nextPhase;
   room.phaseStartedAt = Date.now();
-  room.phaseEndsAt = PHASE_DURATIONS[nextPhase] ? room.phaseStartedAt + PHASE_DURATIONS[nextPhase] : null;
+  room.phaseEndsAt = GAME_CONFIG.phaseDurations[nextPhase]
+    ? room.phaseStartedAt + GAME_CONFIG.phaseDurations[nextPhase]
+    : null;
 
   if (nextPhase === "spark") {
     room.round += 1;
@@ -156,12 +148,15 @@ function enterPhase(room, nextPhase) {
 function startGame(room) {
   const humans = room.players.filter((player) => player.role === "human");
 
-  if (humans.length < 2) {
-    return { ok: false, error: "Two human players must join before starting." };
+  if (humans.length < GAME_CONFIG.players.humansRequired) {
+    return {
+      ok: false,
+      error: `${GAME_CONFIG.players.humansRequired} human players must join before starting.`,
+    };
   }
 
-  room.players = humans.slice(0, 2);
-  room.players.push(...createAiPlayers());
+  room.players = humans.slice(0, GAME_CONFIG.players.humansRequired);
+  room.players.push(...createAiPlayers(0, GAME_CONFIG.players.aiCount));
   room.round = 0;
   room.eliminatedPlayerIds = [];
   room.revealedRoles = {};
@@ -246,7 +241,7 @@ function submitSpark(room, playerId, text) {
     return { ok: false, error: phaseError || aliveError };
   }
 
-  const answer = cleanText(text, 80);
+  const answer = cleanText(text, GAME_CONFIG.textLimits.sparkAnswer);
 
   if (!answer) {
     return { ok: false, error: "Spark answer cannot be empty." };
@@ -265,7 +260,7 @@ function sendChat(room, playerId, text) {
     return { ok: false, error: phaseError || aliveError };
   }
 
-  const message = cleanText(text, 500);
+  const message = cleanText(text, GAME_CONFIG.textLimits.chatMessage);
 
   if (!message) {
     return { ok: false, error: "Message cannot be empty." };
@@ -284,7 +279,7 @@ function submitFinal(room, playerId, text) {
     return { ok: false, error: phaseError || aliveError };
   }
 
-  const statement = cleanText(text, 240);
+  const statement = cleanText(text, GAME_CONFIG.textLimits.finalStatement);
 
   if (!statement) {
     return { ok: false, error: "Final statement cannot be empty." };
@@ -399,7 +394,7 @@ function joinRoom(room, action, context) {
     return { ok: false, error: "Players can only join during the lobby." };
   }
 
-  const name = cleanText(action.name, 24);
+  const name = cleanText(action.name, GAME_CONFIG.textLimits.playerName);
 
   if (!name) {
     return { ok: false, error: "Name is required." };
@@ -413,8 +408,11 @@ function joinRoom(room, action, context) {
     return { ok: true, playerId: existing.id };
   }
 
-  if (room.players.filter((player) => player.role === "human").length >= 2) {
-    return { ok: false, error: "The demo room already has two human players." };
+  if (room.players.filter((player) => player.role === "human").length >= GAME_CONFIG.players.humansRequired) {
+    return {
+      ok: false,
+      error: `The demo room already has ${GAME_CONFIG.players.humansRequired} human players.`,
+    };
   }
 
   const player = createHumanPlayer(name, context.connectionId);
