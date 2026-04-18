@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clipped
+  namespace: clipped
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: clipped
+  template:
+    metadata:
+      labels:
+        app: clipped
+    spec:
+      containers:
+        - name: clipped
+          image: docker.io/bandpassednoise/clipped:latest
+          imagePullPolicy: Always
+          env:
+            - name: HOST
+              value: "0.0.0.0"
+            - name: PORT
+              value: "3000"
+          ports:
+            - containerPort: 3000
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /state
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /state
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

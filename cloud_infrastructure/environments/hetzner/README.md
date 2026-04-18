@@ -61,6 +61,90 @@ kubectl get nodes
 ssh -i ~/.ssh/k3s-minimal.pem root@$K3S_IP
 ```
 
+## Deploy the game to k3s
+
+This environment only provisions the Hetzner infrastructure and the single-node
+k3s cluster. The game deployment is handled separately with manual Kubernetes
+manifests from the repo root under `k8s/`.
+
+### Public reachability
+
+- Public IP: the Hetzner k3s server IPv4 from `terragrunt output -raw k3s_public_ip`
+- Public hostname: `clipped.chat`
+- Ingress: `ingress-nginx` bound directly to the node on ports `80` and `443`
+- TLS: Let's Encrypt via `cert-manager`
+
+### 1. Build and push the Docker image
+
+From the repo root:
+
+```bash
+./scripts/publish-image.sh
+```
+
+### 2. Point DNS to the Hetzner node
+
+From `minimal/k3s`:
+
+```bash
+terragrunt output -raw k3s_public_ip
+```
+
+Create a Porkbun DNS `A` record for `clipped.chat` pointing to that IP.
+
+### 3. Install ingress-nginx
+
+From the repo root:
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.12.1/deploy/static/provider/baremetal/deploy.yaml
+kubectl apply -f k8s/ingress-nginx-hostnetwork-patch.yaml
+kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx
+```
+
+The Hetzner firewall already allows inbound `80` and `443`, so once the
+controller is ready the node public IP can serve web traffic directly.
+
+### 4. Install cert-manager
+
+```bash
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.yaml
+kubectl rollout status deployment/cert-manager -n cert-manager
+kubectl rollout status deployment/cert-manager-webhook -n cert-manager
+kubectl rollout status deployment/cert-manager-cainjector -n cert-manager
+```
+
+Update the ACME email in `k8s/cluster-issuer.yaml`, then apply:
+
+```bash
+kubectl apply -f k8s/cluster-issuer.yaml
+```
+
+### 5. Apply the app manifests
+
+```bash
+kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/deployment.yaml
+kubectl apply -f k8s/service.yaml
+kubectl apply -f k8s/ingress.yaml
+```
+
+### 6. Verify
+
+```bash
+kubectl rollout status deployment/clipped -n clipped
+kubectl get ingress -n clipped
+kubectl get certificate -n clipped
+curl -sS http://clipped.chat/state
+curl -sS https://clipped.chat/state
+```
+
+Once the certificate is issued, the game should be reachable at:
+
+```text
+https://clipped.chat
+```
+
 ## Sync data to Object Storage
 
 After the `object_storage` stack is applied, sync data from the VM volume to the bucket using `mc` (MinIO CLI):
