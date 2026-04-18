@@ -472,13 +472,20 @@ function createMockAgentManager({
         textAction.text,
       );
 
+      const remainingMs = Math.max((room.phaseEndsAt || Infinity) - Date.now(), 0);
+      const maxSendDelayMs = Math.max(remainingMs - 1500, 300);
+      const clampedSendDelayMs = Math.min(sendDelayMs, maxSendDelayMs);
+      const clampedPreTypingDelayMs = Math.min(preTypingDelayMs, Math.max(clampedSendDelayMs - 200, 100));
+
       logger?.info("agent response timing", {
         agent: player.name,
         phase,
         words: wordCount,
-        preTypingDelayMs,
+        preTypingDelayMs: clampedPreTypingDelayMs,
         typingDurationMs,
-        sendInMs: sendDelayMs,
+        sendInMs: clampedSendDelayMs,
+        clamped: clampedSendDelayMs < sendDelayMs,
+        remainingMs,
         preview: textAction.text,
       });
 
@@ -488,7 +495,7 @@ function createMockAgentManager({
         }
 
         await setAgentTyping(room, player, true);
-      }, preTypingDelayMs);
+      }, clampedPreTypingDelayMs);
 
       schedule(`${player.name} ${timingLabel}`, async () => {
         if (room.phase !== phase) {
@@ -509,7 +516,7 @@ function createMockAgentManager({
           await setAgentTyping(room, player, false);
           markAgentCompleted(room, player.id);
         }
-      }, sendDelayMs);
+      }, clampedSendDelayMs);
     }, delayMs);
   }
 
