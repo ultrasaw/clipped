@@ -63,6 +63,67 @@ const AI_ROSTER = [
 const DEFAULT_GAMEPLAY_PROMPT =
   "You are an AI contestant trying to pass as human, avoid suspicion, and identify who feels least human.";
 
+function pickRandomSubset(list, minCount, maxCount) {
+  const shuffled = [...list].sort(() => Math.random() - 0.5);
+  const desiredCount = Math.min(
+    shuffled.length,
+    minCount + Math.floor(Math.random() * (Math.max(maxCount - minCount + 1, 1))),
+  );
+
+  return shuffled.slice(0, Math.max(1, desiredCount));
+}
+
+function randomInt(min, max) {
+  return min + Math.floor(Math.random() * (max - min + 1));
+}
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function mentionsPlayer(messageText, playerName) {
+  const pattern = new RegExp(`\\b${escapeRegex(playerName)}\\b`, "i");
+  return pattern.test(String(messageText || ""));
+}
+
+function countWords(text) {
+  return String(text || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+}
+
+function getTextActionTiming(text) {
+  const wordCount = Math.max(1, countWords(text));
+  const typingDurationMs = Math.round((wordCount / 55) * 60 * 1000) + randomInt(250, 550);
+  const preTypingDelayMs = randomInt(150, 650);
+
+  return {
+    wordCount,
+    typingDurationMs,
+    preTypingDelayMs,
+    sendDelayMs: preTypingDelayMs + typingDurationMs,
+  };
+}
+
+function pickSparkAnswerDelay(room, index, totalAgents) {
+  const remainingMs = Math.max(1_500, (room.phaseEndsAt || Date.now() + 8_000) - Date.now());
+  const lateWindowMs = Math.min(5_000, Math.max(2_500, remainingMs - 1_000));
+  const lateStartMs = Math.max(900, remainingMs - lateWindowMs);
+  const lateEndMs = Math.max(lateStartMs, remainingMs - 700);
+  const shouldAnswerLate = remainingMs <= 7_000 || Math.random() < 0.8;
+
+  if (!shouldAnswerLate || lateStartMs <= 1_200) {
+    return randomInt(700, Math.max(900, lateStartMs));
+  }
+
+  const slotWidth = Math.max(300, Math.floor((lateEndMs - lateStartMs) / Math.max(totalAgents, 1)));
+  const slotStart = Math.min(lateEndMs, lateStartMs + index * slotWidth);
+  const slotEnd = Math.min(lateEndMs, Math.max(slotStart, slotStart + slotWidth - 150));
+
+  return randomInt(slotStart, Math.max(slotStart, slotEnd));
+}
+
 function createAiPlayers(startIndex = 0, count = AI_ROSTER.length) {
   return AI_ROSTER.slice(0, count).map((profile, index) => ({
     id: `ai_${index + startIndex + 1}`,
@@ -93,6 +154,7 @@ function createRuntimeAgent(player) {
 function createMockAgentManager({ applyAction, broadcastState, logger, submitAction }) {
   const timeouts = new Set();
   const runtimeAgents = new Map();
+  const pendingChatAgentIds = new Set();
 
   function schedule(label, callback, delayMs) {
     logger?.debug("agent scheduled", { label, inMs: delayMs });
@@ -120,6 +182,7 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
     }
 
     timeouts.clear();
+    pendingChatAgentIds.clear();
   }
 
   function getRuntimeAgent(player) {
@@ -160,9 +223,17 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
     broadcastState();
   }
 
-  async function runAgentMethod(room, player, methodName) {
+  async function setAgentTyping(room, player, isTyping) {
+    await submitAiAction(room, {
+      type: "SET_TYPING",
+      playerId: player.id,
+      isTyping,
+    });
+  }
+
+  async function generateAgentActions(room, player, methodName, options = {}) {
     const agent = getRuntimeAgent(player);
-    const context = buildAgentContext(room, player);
+    const context = buildAgentContext(room, player, options);
 
     agent.onPhaseStarted(context);
     logger?.info("agent thinking", {
@@ -180,24 +251,180 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
         method: methodName,
         phase: room.phase,
       });
-      return;
+      return [];
     }
 
-    const actions = Array.isArray(actionOrActions) ? actionOrActions : [actionOrActions];
+    return (Array.isArray(actionOrActions) ? actionOrActions : [actionOrActions]).filter(Boolean);
+  }
+
+  async function runAgentMethod(room, player, methodName, options = {}) {
+    const actions = await generateAgentActions(room, player, methodName, options);
 
     for (const action of actions) {
-      if (!action) {
-        continue;
-      }
-
       logger?.info("agent produced action", {
-        agent: agent.name,
+        agent: player.name,
         method: methodName,
         type: action.type,
         text: action.text,
         targetId: action.targetId,
       });
       await submitAiAction(room, action);
+    }
+
+    return actions;
+  }
+
+  function scheduleTimedTextAction(room, player, delayMs, options) {
+    const { methodName, expectedType, phase, timingLabel } = options;
+
+    schedule(`${player.name} prepare ${timingLabel}`, async () => {
+      if (room.phase !== phase) {
+        return;
+      }
+
+      const actions = await generateAgentActions(room, player, methodName);
+      const textAction = actions.find((action) => action.type === expectedType && action.text);
+
+      if (!textAction) {
+        return;
+      }
+
+      const { wordCount, typingDurationMs, preTypingDelayMs, sendDelayMs } = getTextActionTiming(
+        textAction.text,
+      );
+
+      logger?.info("agent response timing", {
+        agent: player.name,
+        phase,
+        words: wordCount,
+        preTypingDelayMs,
+        typingDurationMs,
+        sendInMs: sendDelayMs,
+        preview: textAction.text,
+      });
+
+      schedule(`${player.name} ${timingLabel} typing start`, async () => {
+        if (room.phase !== phase) {
+          return;
+        }
+
+        await setAgentTyping(room, player, true);
+      }, preTypingDelayMs);
+
+      schedule(`${player.name} ${timingLabel}`, async () => {
+        if (room.phase !== phase) {
+          return;
+        }
+
+        try {
+          logger?.info("agent produced action", {
+            agent: player.name,
+            method: methodName,
+            type: textAction.type,
+            text: textAction.text,
+            targetId: textAction.targetId,
+          });
+          await submitAiAction(room, textAction);
+        } finally {
+          await setAgentTyping(room, player, false);
+        }
+      }, sendDelayMs);
+    }, delayMs);
+  }
+
+  function scheduleChatResponse(room, player, delayMs) {
+    pendingChatAgentIds.add(player.id);
+    const recentChatMessages = room.messages
+      .filter((message) => message.kind === "chat")
+      .slice(-3)
+      .map((message) => ({
+        id: message.id,
+        playerId: message.playerId,
+        sender: message.sender,
+        text: message.text,
+        kind: message.kind,
+        createdAt: message.createdAt,
+      }));
+
+    schedule(`${player.name} prepare chat response`, async () => {
+      try {
+        if (room.phase !== "chat") {
+          return;
+        }
+
+        const actions = await generateAgentActions(room, player, "getChatActions", { recentChatMessages });
+        const chatAction = actions.find((action) => action.type === "SEND_CHAT" && action.text);
+
+        if (!chatAction) {
+          return;
+        }
+
+        const { wordCount, typingDurationMs, preTypingDelayMs, sendDelayMs } = getTextActionTiming(
+          chatAction.text,
+        );
+
+        logger?.info("agent response timing", {
+          agent: player.name,
+          words: wordCount,
+          preTypingDelayMs,
+          typingDurationMs,
+          sendInMs: sendDelayMs,
+          preview: chatAction.text,
+        });
+
+        schedule(`${player.name} typing start`, async () => {
+          if (room.phase !== "chat") {
+            return;
+          }
+
+          await setAgentTyping(room, player, true);
+        }, preTypingDelayMs);
+
+        schedule(`${player.name} chat response`, async () => {
+          try {
+            if (room.phase !== "chat") {
+              return;
+            }
+
+            logger?.info("agent produced action", {
+              agent: player.name,
+              method: "getChatActions",
+              type: chatAction.type,
+              text: chatAction.text,
+              targetId: chatAction.targetId,
+            });
+            await submitAiAction(room, chatAction);
+            await setAgentTyping(room, player, false);
+          } finally {
+            pendingChatAgentIds.delete(player.id);
+          }
+        }, sendDelayMs);
+      } catch (error) {
+        pendingChatAgentIds.delete(player.id);
+        throw error;
+      }
+    }, delayMs);
+  }
+
+  function handleChatActivity(room, message) {
+    if (room.phase !== "chat") {
+      return;
+    }
+
+    const agents = room.players.filter((player) => player.role === "ai" && player.status === "alive");
+
+    for (const agent of agents) {
+      if (agent.id === message.playerId || pendingChatAgentIds.has(agent.id)) {
+        continue;
+      }
+
+      const responseProbability = mentionsPlayer(message.text, agent.name) ? 0.8 : 0.4;
+
+      if (Math.random() > responseProbability) {
+        continue;
+      }
+
+      scheduleChatResponse(room, agent, randomInt(250, 1200));
     }
   }
 
@@ -208,24 +435,33 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
     logger?.info("agent manager handling phase", { phase: room.phase, agents: agents.length });
 
     if (room.phase === "spark") {
-      agents.forEach((agent, index) => {
-        schedule(`${agent.name} spark answer`, () => runAgentMethod(room, agent, "getSparkAction"), 4_500 + index * 1_500);
+      const shuffledAgents = [...agents].sort(() => Math.random() - 0.5);
+
+      shuffledAgents.forEach((agent, index) => {
+        schedule(
+          `${agent.name} spark answer`,
+          () => runAgentMethod(room, agent, "getSparkAction"),
+          pickSparkAnswerDelay(room, index, shuffledAgents.length),
+        );
       });
     }
 
     if (room.phase === "chat") {
-      agents.forEach((agent, index) => {
-        schedule(`${agent.name} chat message`, () => runAgentMethod(room, agent, "getChatActions"), 1_200 + index * 1_500);
+      const visibleTypers = pickRandomSubset(agents, 1, Math.min(3, agents.length));
+
+      visibleTypers.forEach((agent, index) => {
+        scheduleChatResponse(room, agent, randomInt(200, 900) + index * 180);
       });
     }
 
     if (room.phase === "final_statements") {
       agents.forEach((agent, index) => {
-        schedule(
-          `${agent.name} final statement`,
-          () => runAgentMethod(room, agent, "getFinalStatementAction"),
-          500 + index * 400,
-        );
+        scheduleTimedTextAction(room, agent, 500 + index * 400, {
+          methodName: "getFinalStatementAction",
+          expectedType: "SUBMIT_FINAL",
+          phase: "final_statements",
+          timingLabel: "final statement",
+        });
       });
     }
 
@@ -233,11 +469,12 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
       const tiedAgents = agents.filter((agent) => room.tiebreakPlayerIds.includes(agent.id));
 
       tiedAgents.forEach((agent, index) => {
-        schedule(
-          `${agent.name} tiebreak statement`,
-          () => runAgentMethod(room, agent, "getTiebreakStatementAction"),
-          500 + index * 400,
-        );
+        scheduleTimedTextAction(room, agent, 500 + index * 400, {
+          methodName: "getTiebreakStatementAction",
+          expectedType: "SUBMIT_TIEBREAK",
+          phase: "tiebreak_statements",
+          timingLabel: "tiebreak statement",
+        });
       });
     }
 
@@ -261,6 +498,7 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
   }
 
   return {
+    handleChatActivity,
     handlePhaseEntered,
     cancelAll,
   };

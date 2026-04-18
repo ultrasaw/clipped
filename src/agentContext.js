@@ -26,7 +26,7 @@ function getHumanReplySamples(room) {
     .slice(-10);
 }
 
-function buildAgentContext(room, agentPlayer) {
+function buildAgentContext(room, agentPlayer, options = {}) {
   const alivePlayers = room.players.filter((player) => player.status === "alive");
   const humanPlayers = room.players
     .filter((player) => player.role === "human")
@@ -35,6 +35,19 @@ function buildAgentContext(room, agentPlayer) {
       name: player.name,
       status: player.status,
     }));
+  const recentChatMessages =
+    options.recentChatMessages ||
+    room.messages
+      .filter((message) => message.kind === "chat")
+      .slice(-3)
+      .map((message) => ({
+        id: message.id,
+        playerId: message.playerId,
+        sender: message.sender,
+        text: message.text,
+        kind: message.kind,
+        createdAt: message.createdAt,
+      }));
   const publicPlayers = room.players.map((player) => ({
     id: player.id,
     name: player.name,
@@ -91,8 +104,9 @@ function buildAgentContext(room, agentPlayer) {
       kind: message.kind,
       createdAt: message.createdAt,
     })),
-    sparkAnswers: { ...room.sparkAnswers },
-    finalStatements: { ...room.finalStatements },
+    recentChatMessages,
+    sparkAnswers: room.phase === "spark" ? {} : { ...room.sparkAnswers },
+    finalStatements: room.phase === "final_statements" ? {} : { ...room.finalStatements },
     revealedVotes: room.revealedVotes ? { ...room.revealedVotes } : null,
     lastEjection: room.lastEjection,
   };

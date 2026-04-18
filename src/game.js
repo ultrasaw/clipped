@@ -51,6 +51,7 @@ function createDemoRoom(options = {}) {
     tiebreakVotes: {},
     revealedVotes: null,
     revealedRoles: {},
+    typingPlayerIds: [],
     eliminatedPlayerIds: [],
     lastEjection: null,
     result: null,
@@ -158,36 +159,44 @@ async function enterPhase(room, nextPhase) {
     room.tiebreakVotes = {};
     room.revealedVotes = null;
     room.lastEjection = null;
+    room.typingPlayerIds = [];
     addSystemMessage(room, `Round ${room.round}: ${room.sparkPrompt}`);
   }
 
   if (nextPhase === "spark_reveal") {
+    room.typingPlayerIds = [];
     addSystemMessage(room, "Spark answers are revealed.");
   }
 
   if (nextPhase === "chat") {
+    room.typingPlayerIds = [];
     addSystemMessage(room, "Chat is open. Say what feels true, or suspicious.");
   }
 
   if (nextPhase === "final_statements") {
+    room.typingPlayerIds = [];
     addSystemMessage(room, "Final statements. Give one read, defense, or accusation.");
   }
 
   if (nextPhase === "vote") {
+    room.typingPlayerIds = [];
     addSystemMessage(room, "Vote for whoever feels least convincingly human.");
   }
 
   if (nextPhase === "tiebreak_statements") {
+    room.typingPlayerIds = [];
     const tiedNames = getPlayersByIds(room, room.tiebreakPlayerIds).map((player) => player.name).join(", ");
     addSystemMessage(room, `Tie between ${tiedNames}. Tied players get one tiebreak statement.`);
   }
 
   if (nextPhase === "tiebreak_vote") {
+    room.typingPlayerIds = [];
     const tiedNames = getPlayersByIds(room, room.tiebreakPlayerIds).map((player) => player.name).join(", ");
     addSystemMessage(room, `Tiebreak vote. Vote only between: ${tiedNames}. Tied players cannot vote.`);
   }
 
   if (nextPhase === "game_over") {
+    room.typingPlayerIds = [];
     resolveGame(room);
     addSystemMessage(room, room.result.summary);
   }
@@ -340,6 +349,7 @@ function sendChat(room, playerId, text) {
   }
 
   addPlayerMessage(room, findPlayer(room, playerId), message, "chat");
+  room.typingPlayerIds = room.typingPlayerIds.filter((id) => id !== playerId);
 
   return { ok: true };
 }
@@ -676,6 +686,33 @@ function resetRoom(room) {
   return { ok: true };
 }
 
+function setTyping(room, playerId, isTyping) {
+  const player = findPlayer(room, playerId);
+
+  if (!player) {
+    return { ok: false, error: "Player was not found." };
+  }
+
+  if (player.status !== "alive") {
+    return { ok: false, error: `${player.name} has been ejected.` };
+  }
+
+  const nextTypingIds = room.typingPlayerIds.filter((id) => id !== playerId);
+
+  if (room.phase === "chat" && isTyping) {
+    nextTypingIds.push(playerId);
+  }
+
+  room.typingPlayerIds = nextTypingIds;
+  addRoomEvent(room, "TYPING_UPDATED", {
+    playerId,
+    playerName: player.name,
+    isTyping: Boolean(isTyping && room.phase === "chat"),
+  });
+
+  return { ok: true };
+}
+
 async function applyAction(room, action, context = {}) {
   switch (action.type) {
     case "JOIN_ROOM":
@@ -696,6 +733,9 @@ async function applyAction(room, action, context = {}) {
 
     case "SEND_CHAT":
       return sendChat(room, action.playerId, action.text);
+
+    case "SET_TYPING":
+      return setTyping(room, action.playerId, action.isTyping);
 
     case "SUBMIT_FINAL":
       return submitFinal(room, action.playerId, action.text);

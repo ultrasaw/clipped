@@ -306,11 +306,24 @@ function summarizeContext(context) {
         .join("\n")
     : "";
 
+  const recentChatMessages = Array.isArray(context.recentChatMessages)
+    ? context.recentChatMessages
+        .map((message) => `${message.sender}: ${message.text}`)
+        .join("\n")
+    : Array.isArray(context.messages)
+      ? context.messages
+          .filter((message) => message.kind === "chat")
+          .slice(-3)
+          .map((message) => `${message.sender}: ${message.text}`)
+          .join("\n")
+      : "";
+
   return joinSections([
     gameSummary,
     playersSummary ? `Players:\n${playersSummary}` : "",
     summarizeHumanSignals(context),
     targetsSummary ? `Legal targets:\n${targetsSummary}` : "",
+    recentChatMessages ? `Last 3 chat messages to respond to:\n${recentChatMessages}` : "",
     recentMessages ? `Recent messages:\n${recentMessages}` : "",
   ]);
 }
@@ -329,6 +342,7 @@ async function createChatMessage(name, personality, gameplayPrompt, context) {
               buildVoiceGuidance(),
               "Keep it natural, suspicious, and conversational for this specific player.",
               "The line should feel like a real person typed it quickly in chat, not like edited copy.",
+              "Respond to one of the last 3 chat messages provided in the context.",
               "Do not add labels, quotation marks, or explanations.",
               "Keep it under 180 characters.",
             ].join(" "),
