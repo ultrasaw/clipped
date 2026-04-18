@@ -8,6 +8,25 @@ function buildAgentContext(room, agentPlayer) {
     revealedRole: room.revealedRoles[player.id] || null,
   }));
 
+  const defaultLegalTargets = alivePlayers
+    .filter((player) => player.id !== agentPlayer.id)
+    .map((player) => ({
+      id: player.id,
+      name: player.name,
+      status: player.status,
+      revealedRole: room.revealedRoles[player.id] || null,
+    }));
+  const tiebreakTargets = room.tiebreakPlayerIds
+    .map((playerId) => room.players.find((player) => player.id === playerId))
+    .filter(Boolean)
+    .filter((player) => player.status === "alive")
+    .map((player) => ({
+      id: player.id,
+      name: player.name,
+      status: player.status,
+      revealedRole: room.revealedRoles[player.id] || null,
+    }));
+
   return {
     agent: {
       id: agentPlayer.id,
@@ -25,14 +44,8 @@ function buildAgentContext(room, agentPlayer) {
     },
     players: publicPlayers,
     alivePlayerIds: alivePlayers.map((player) => player.id),
-    legalTargets: alivePlayers
-      .filter((player) => player.id !== agentPlayer.id)
-      .map((player) => ({
-        id: player.id,
-        name: player.name,
-        status: player.status,
-        revealedRole: room.revealedRoles[player.id] || null,
-      })),
+    tiedPlayerIds: room.tiebreakPlayerIds,
+    legalTargets: room.phase === "tiebreak_vote" ? tiebreakTargets : defaultLegalTargets,
     messages: room.messages.map((message) => ({
       id: message.id,
       playerId: message.playerId,

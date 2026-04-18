@@ -285,9 +285,25 @@ function normalizeAction(action, playerId) {
     };
   }
 
+  if (action.type === "SUBMIT_TIEBREAK") {
+    return {
+      type: "SUBMIT_TIEBREAK",
+      playerId,
+      text: action.text,
+    };
+  }
+
   if (action.type === "CAST_VOTE") {
     return {
       type: "CAST_VOTE",
+      voterId: playerId,
+      targetId: action.targetId,
+    };
+  }
+
+  if (action.type === "CAST_TIEBREAK_VOTE") {
+    return {
+      type: "CAST_TIEBREAK_VOTE",
       voterId: playerId,
       targetId: action.targetId,
     };
@@ -765,7 +781,14 @@ function summarizeEvent(event) {
   }
 
   if (event.type === "PLAYER_EJECTED") {
-    return `${event.playerName} was ejected and revealed as ${event.revealedRole}.`;
+    const names = event.playerNames?.join(", ") || event.playerName;
+    const roles = event.revealedRoles?.join(", ") || event.revealedRole;
+
+    return `${names} ejected and revealed as ${roles}.`;
+  }
+
+  if (event.type === "VOTE_TIED") {
+    return `Vote tied with ${event.topVoteCount} votes each. Tiebreak required.`;
   }
 
   if (event.type === "GAME_STARTED") {
@@ -820,6 +843,13 @@ function describeWaitingFor(currentRoom) {
   const missingSpark = alivePlayers.filter((player) => !currentRoom.sparkAnswers[player.id]);
   const missingFinal = alivePlayers.filter((player) => !currentRoom.finalStatements[player.id]);
   const missingVotes = alivePlayers.filter((player) => !currentRoom.votes[player.id]);
+  const tiedPlayers = currentRoom.tiebreakPlayerIds
+    .map((playerId) => currentRoom.players.find((player) => player.id === playerId))
+    .filter(Boolean)
+    .filter((player) => player.status === "alive");
+  const tiebreakVoters = alivePlayers.filter((player) => !currentRoom.tiebreakPlayerIds.includes(player.id));
+  const missingTiebreakStatements = tiedPlayers.filter((player) => !currentRoom.tiebreakStatements[player.id]);
+  const missingTiebreakVotes = tiebreakVoters.filter((player) => !currentRoom.tiebreakVotes[player.id]);
   const humanCount = currentRoom.players.filter((player) => player.role === "human").length;
 
   if (currentRoom.phase === "lobby") {
@@ -852,6 +882,18 @@ function describeWaitingFor(currentRoom) {
       : "advance to reveal";
   }
 
+  if (currentRoom.phase === "tiebreak_statements") {
+    return missingTiebreakStatements.length
+      ? `tiebreak statements from ${missingTiebreakStatements.map((player) => player.name).join(", ")}`
+      : "advance to tiebreak vote";
+  }
+
+  if (currentRoom.phase === "tiebreak_vote") {
+    return missingTiebreakVotes.length
+      ? `tiebreak votes from ${missingTiebreakVotes.map((player) => player.name).join(", ")}`
+      : "advance to reveal";
+  }
+
   if (currentRoom.phase === "reveal") {
     return "advance to next round or game over";
   }
@@ -880,6 +922,25 @@ function shouldAutoAdvance(currentRoom) {
 
   if (currentRoom.phase === "vote") {
     return alivePlayers.every((player) => Boolean(currentRoom.votes[player.id]));
+  }
+
+  if (currentRoom.phase === "tiebreak_statements") {
+    const tiedPlayers = currentRoom.tiebreakPlayerIds
+      .map((playerId) => currentRoom.players.find((player) => player.id === playerId))
+      .filter(Boolean)
+      .filter((player) => player.status === "alive");
+
+    return tiedPlayers.every((player) => Boolean(currentRoom.tiebreakStatements[player.id]));
+  }
+
+  if (currentRoom.phase === "tiebreak_vote") {
+    const eligibleVoters = alivePlayers.filter((player) => !currentRoom.tiebreakPlayerIds.includes(player.id));
+
+    if (!eligibleVoters.length) {
+      return true;
+    }
+
+    return eligibleVoters.every((player) => Boolean(currentRoom.tiebreakVotes[player.id]));
   }
 
   return false;

@@ -12,6 +12,8 @@ const AGENT_ACTION_TYPES = {
   SEND_CHAT: "SEND_CHAT",
   SUBMIT_FINAL: "SUBMIT_FINAL",
   CAST_VOTE: "CAST_VOTE",
+  SUBMIT_TIEBREAK: "SUBMIT_TIEBREAK",
+  CAST_TIEBREAK_VOTE: "CAST_TIEBREAK_VOTE",
 };
 
 class BaseAgent {
@@ -66,6 +68,20 @@ class BaseAgent {
   async getVoteAction(_context) {
     return null;
   }
+
+  /**
+   * Return a SUBMIT_TIEBREAK action or null.
+   */
+  async getTiebreakStatementAction(_context) {
+    return null;
+  }
+
+  /**
+   * Return a CAST_TIEBREAK_VOTE action or null.
+   */
+  async getTiebreakVoteAction(_context) {
+    return null;
+  }
 }
 
 function createSparkAction(agentId, text) {
@@ -100,6 +116,22 @@ function createVoteAction(agentId, targetId) {
   };
 }
 
+function createTiebreakStatementAction(agentId, text) {
+  return {
+    type: AGENT_ACTION_TYPES.SUBMIT_TIEBREAK,
+    playerId: agentId,
+    text,
+  };
+}
+
+function createTiebreakVoteAction(agentId, targetId) {
+  return {
+    type: AGENT_ACTION_TYPES.CAST_TIEBREAK_VOTE,
+    voterId: agentId,
+    targetId,
+  };
+}
+
 module.exports = {
   AGENT_ACTION_TYPES,
   BaseAgent,
@@ -107,4 +139,6 @@ module.exports = {
   createChatAction,
   createFinalStatementAction,
   createVoteAction,
+  createTiebreakStatementAction,
+  createTiebreakVoteAction,
 };

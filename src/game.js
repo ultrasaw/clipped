@@ -9,6 +9,8 @@ const PHASES = [
   "chat",
   "final_statements",
   "vote",
+  "tiebreak_statements",
+  "tiebreak_vote",
   "reveal",
   "game_over",
 ];
@@ -42,6 +44,9 @@ function createDemoRoom() {
     sparkAnswers: {},
     finalStatements: {},
     votes: {},
+    tiebreakPlayerIds: [],
+    tiebreakStatements: {},
+    tiebreakVotes: {},
     revealedVotes: null,
     revealedRoles: {},
     eliminatedPlayerIds: [],
@@ -88,6 +93,10 @@ function getAlivePlayers(room) {
 
 function findPlayer(room, playerId) {
   return room.players.find((player) => player.id === playerId);
+}
+
+function getPlayersByIds(room, playerIds) {
+  return playerIds.map((playerId) => findPlayer(room, playerId)).filter(Boolean);
 }
 
 function addSystemMessage(room, text) {
@@ -141,6 +150,9 @@ function enterPhase(room, nextPhase) {
     room.sparkAnswers = {};
     room.finalStatements = {};
     room.votes = {};
+    room.tiebreakPlayerIds = [];
+    room.tiebreakStatements = {};
+    room.tiebreakVotes = {};
     room.revealedVotes = null;
     room.lastEjection = null;
     addSystemMessage(room, `Round ${room.round}: ${room.sparkPrompt}`);
@@ -160,6 +172,16 @@ function enterPhase(room, nextPhase) {
 
   if (nextPhase === "vote") {
     addSystemMessage(room, "Vote for whoever feels least convincingly human.");
+  }
+
+  if (nextPhase === "tiebreak_statements") {
+    const tiedNames = getPlayersByIds(room, room.tiebreakPlayerIds).map((player) => player.name).join(", ");
+    addSystemMessage(room, `Tie between ${tiedNames}. Tied players get one tiebreak statement.`);
+  }
+
+  if (nextPhase === "tiebreak_vote") {
+    const tiedNames = getPlayersByIds(room, room.tiebreakPlayerIds).map((player) => player.name).join(", ");
+    addSystemMessage(room, `Tiebreak vote. Vote only between: ${tiedNames}. Tied players cannot vote.`);
   }
 
   if (nextPhase === "game_over") {
@@ -221,7 +243,24 @@ function advancePhase(room) {
   }
 
   if (room.phase === "vote") {
-    resolveVote(room);
+    const result = resolveVote(room);
+
+    if (result.outcome === "tie") {
+      enterPhase(room, "tiebreak_statements");
+      return { ok: true };
+    }
+
+    enterPhase(room, "reveal");
+    return { ok: true };
+  }
+
+  if (room.phase === "tiebreak_statements") {
+    enterPhase(room, "tiebreak_vote");
+    return { ok: true };
+  }
+
+  if (room.phase === "tiebreak_vote") {
+    resolveTiebreakVote(room);
     enterPhase(room, "reveal");
     return { ok: true };
   }
@@ -319,6 +358,30 @@ function submitFinal(room, playerId, text) {
   return { ok: true };
 }
 
+function submitTiebreak(room, playerId, text) {
+  const phaseError = assertPhase(room, "tiebreak_statements");
+  const aliveError = assertAlive(room, playerId);
+
+  if (phaseError || aliveError) {
+    return { ok: false, error: phaseError || aliveError };
+  }
+
+  if (!room.tiebreakPlayerIds.includes(playerId)) {
+    return { ok: false, error: "Only tied players can submit tiebreak statements." };
+  }
+
+  const statement = cleanText(text, GAME_CONFIG.textLimits.tiebreakStatement);
+
+  if (!statement) {
+    return { ok: false, error: "Tiebreak statement cannot be empty." };
+  }
+
+  room.tiebreakStatements[playerId] = statement;
+  addPlayerMessage(room, findPlayer(room, playerId), statement, "final");
+
+  return { ok: true };
+}
+
 function castVote(room, voterId, targetId) {
   const phaseError = assertPhase(room, "vote");
   const voterError = assertAlive(room, voterId);
@@ -337,12 +400,62 @@ function castVote(room, voterId, targetId) {
   return { ok: true };
 }
 
-function resolveVote(room) {
+function castTiebreakVote(room, voterId, targetId) {
+  const phaseError = assertPhase(room, "tiebreak_vote");
+  const voterError = assertAlive(room, voterId);
+  const targetError = assertAlive(room, targetId);
+
+  if (phaseError || voterError || targetError) {
+    return { ok: false, error: phaseError || voterError || targetError };
+  }
+
+  if (room.tiebreakPlayerIds.includes(voterId)) {
+    return { ok: false, error: "Tied players cannot vote in the tiebreak." };
+  }
+
+  if (!room.tiebreakPlayerIds.includes(targetId)) {
+    return { ok: false, error: "Tiebreak votes must target one of the tied players." };
+  }
+
+  room.tiebreakVotes[voterId] = targetId;
+
+  return { ok: true };
+}
+
+function getVoteCounts(votes) {
   const counts = new Map();
 
-  for (const targetId of Object.values(room.votes)) {
+  for (const targetId of Object.values(votes)) {
     counts.set(targetId, (counts.get(targetId) || 0) + 1);
   }
+
+  return counts;
+}
+
+function getTopVotedPlayerIds(room, counts, candidateIds = null) {
+  let highestVotes = -1;
+  let topPlayerIds = [];
+  const candidates = candidateIds ? getPlayersByIds(room, candidateIds) : getAlivePlayers(room);
+
+  for (const player of candidates) {
+    const count = counts.get(player.id) || 0;
+
+    if (count > highestVotes) {
+      highestVotes = count;
+      topPlayerIds = [player.id];
+    } else if (count === highestVotes) {
+      topPlayerIds.push(player.id);
+    }
+  }
+
+  return {
+    highestVotes,
+    topPlayerIds,
+  };
+}
+
+function resolveVote(room) {
+  const counts = getVoteCounts(room.votes);
 
   if (counts.size === 0) {
     room.lastEjection = null;
@@ -352,44 +465,109 @@ function resolveVote(room) {
       outcome: "no_votes",
       votes: {},
     });
-    return;
+    return { outcome: "no_votes" };
   }
 
-  let ejectedId = null;
-  let highestVotes = -1;
+  const { highestVotes, topPlayerIds } = getTopVotedPlayerIds(room, counts);
 
-  for (const player of getAlivePlayers(room)) {
-    const count = counts.get(player.id) || 0;
-
-    if (count > highestVotes) {
-      highestVotes = count;
-      ejectedId = player.id;
-    }
+  if (topPlayerIds.length > 1) {
+    room.tiebreakPlayerIds = topPlayerIds;
+    room.tiebreakStatements = {};
+    room.tiebreakVotes = {};
+    room.revealedVotes = { ...room.votes };
+    room.lastEjection = null;
+    addSystemMessage(
+      room,
+      `The vote is tied between ${getPlayersByIds(room, topPlayerIds)
+        .map((player) => player.name)
+        .join(", ")}.`,
+    );
+    addRoomEvent(room, "VOTE_TIED", {
+      outcome: "tiebreak_required",
+      tiedPlayerIds: topPlayerIds,
+      topVoteCount: highestVotes,
+      votes: { ...room.votes },
+    });
+    return { outcome: "tie", tiedPlayerIds: topPlayerIds };
   }
 
-  if (!ejectedId) {
+  room.revealedVotes = { ...room.votes };
+  ejectPlayers(room, topPlayerIds, {
+    reason: "vote",
+    votes: { ...room.votes },
+  });
+  return { outcome: "ejected", ejectedPlayerIds: topPlayerIds };
+}
+
+function resolveTiebreakVote(room) {
+  const counts = getVoteCounts(room.tiebreakVotes);
+
+  if (counts.size === 0) {
+    ejectPlayers(room, room.tiebreakPlayerIds, {
+      reason: "tiebreak_no_votes",
+      votes: {},
+    });
+    return { outcome: "all_tied_ejected", ejectedPlayerIds: room.tiebreakPlayerIds };
+  }
+
+  const { highestVotes, topPlayerIds } = getTopVotedPlayerIds(room, counts, room.tiebreakPlayerIds);
+
+  room.revealedVotes = { ...room.votes, ...room.tiebreakVotes };
+  ejectPlayers(room, topPlayerIds, {
+    reason: topPlayerIds.length > 1 ? "tiebreak_multi_ejection" : "tiebreak",
+    topVoteCount: highestVotes,
+    votes: { ...room.tiebreakVotes },
+  });
+
+  return {
+    outcome: topPlayerIds.length > 1 ? "all_tied_ejected" : "ejected",
+    ejectedPlayerIds: topPlayerIds,
+  };
+}
+
+function ejectPlayers(room, playerIds, details = {}) {
+  const ejectedPlayers = getPlayersByIds(room, playerIds).filter((player) => player.status === "alive");
+
+  if (!ejectedPlayers.length) {
     room.lastEjection = null;
     addSystemMessage(room, "No one was ejected.");
     return;
   }
 
-  const ejected = findPlayer(room, ejectedId);
-  ejected.status = "ejected";
-  room.eliminatedPlayerIds.push(ejected.id);
-  room.revealedRoles[ejected.id] = ejected.role.toUpperCase();
-  room.revealedVotes = { ...room.votes };
-  room.lastEjection = {
-    playerId: ejected.id,
-    name: ejected.name,
-    role: ejected.role,
-  };
+  for (const player of ejectedPlayers) {
+    player.status = "ejected";
+    room.eliminatedPlayerIds.push(player.id);
+    room.revealedRoles[player.id] = player.role.toUpperCase();
+  }
 
-  addSystemMessage(room, `${ejected.name} was ejected and revealed as ${ejected.role.toUpperCase()}.`);
+  room.lastEjection =
+    ejectedPlayers.length === 1
+      ? {
+          playerId: ejectedPlayers[0].id,
+          name: ejectedPlayers[0].name,
+          role: ejectedPlayers[0].role,
+        }
+      : {
+          playerIds: ejectedPlayers.map((player) => player.id),
+          names: ejectedPlayers.map((player) => player.name),
+          roles: ejectedPlayers.map((player) => player.role),
+        };
+
+  if (ejectedPlayers.length === 1) {
+    const ejected = ejectedPlayers[0];
+    addSystemMessage(room, `${ejected.name} was ejected and revealed as ${ejected.role.toUpperCase()}.`);
+  } else {
+    addSystemMessage(
+      room,
+      `${ejectedPlayers.map((player) => player.name).join(" and ")} were ejected and revealed.`,
+    );
+  }
+
   addRoomEvent(room, "PLAYER_EJECTED", {
-    playerId: ejected.id,
-    playerName: ejected.name,
-    revealedRole: ejected.role.toUpperCase(),
-    votes: { ...room.votes },
+    playerIds: ejectedPlayers.map((player) => player.id),
+    playerNames: ejectedPlayers.map((player) => player.name),
+    revealedRoles: ejectedPlayers.map((player) => player.role.toUpperCase()),
+    ...details,
   });
 }
 
@@ -508,8 +686,14 @@ function applyAction(room, action, context = {}) {
     case "SUBMIT_FINAL":
       return submitFinal(room, action.playerId, action.text);
 
+    case "SUBMIT_TIEBREAK":
+      return submitTiebreak(room, action.playerId, action.text);
+
     case "CAST_VOTE":
       return castVote(room, action.voterId, action.targetId);
+
+    case "CAST_TIEBREAK_VOTE":
+      return castTiebreakVote(room, action.voterId, action.targetId);
 
     case "RESET_ROOM":
       return resetRoom(room);

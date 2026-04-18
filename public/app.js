@@ -32,6 +32,8 @@ const phaseLabels = {
   chat: "Open Chat",
   final_statements: "Final Statements",
   vote: "Vote",
+  tiebreak_statements: "Tiebreak Statements",
+  tiebreak_vote: "Tiebreak Vote",
   reveal: "Reveal",
   game_over: "Game Over",
 };
@@ -96,6 +98,16 @@ function actionForPhase(phase) {
       type: "SUBMIT_FINAL",
       label: "Final Statement",
       placeholder: "One read, defense, or accusation...",
+      button: "Submit",
+      enabled: true,
+    };
+  }
+
+  if (phase === "tiebreak_statements") {
+    return {
+      type: "SUBMIT_TIEBREAK",
+      label: "Tiebreak Statement",
+      placeholder: "One last defense...",
       button: "Submit",
       enabled: true,
     };
@@ -210,26 +222,48 @@ function renderMessages() {
 }
 
 function renderVote() {
-  if (state.phase !== "vote" || !state.viewer) {
+  if ((state.phase !== "vote" && state.phase !== "tiebreak_vote") || !state.viewer) {
     votePanel.classList.add("hidden");
     votePanel.innerHTML = "";
     return;
   }
 
+  const isTiebreak = state.phase === "tiebreak_vote";
+  const viewerIsTied = isTiebreak && state.tiebreakPlayerIds.includes(state.viewer.id);
   const targets = state.players.filter((player) => {
-    return player.status === "alive" && player.id !== state.viewer.id;
+    if (player.status !== "alive") {
+      return false;
+    }
+
+    if (isTiebreak) {
+      return state.tiebreakPlayerIds.includes(player.id);
+    }
+
+    return player.id !== state.viewer.id;
   });
-  const hasVoted = state.viewer.submissions.vote;
+  const hasVoted = isTiebreak ? state.viewer.submissions.tiebreakVote : state.viewer.submissions.vote;
+  const disabled = hasVoted || viewerIsTied;
+  const title = (() => {
+    if (viewerIsTied) {
+      return "You are tied. Other players are voting.";
+    }
+
+    if (hasVoted) {
+      return "Vote submitted. Waiting for the room...";
+    }
+
+    return isTiebreak ? "Break the tie. Choose one tied player." : "Who feels least convincingly human?";
+  })();
 
   votePanel.classList.remove("hidden");
   votePanel.innerHTML = `
-    <p class="eyebrow">Vote</p>
-    <h3>${hasVoted ? "Vote submitted. Waiting for the room..." : "Who feels least convincingly human?"}</h3>
+    <p class="eyebrow">${isTiebreak ? "Tiebreak Vote" : "Vote"}</p>
+    <h3>${title}</h3>
     <div class="vote-grid">
       ${targets
         .map(
           (player) => `
-            <button class="vote-card" data-target-id="${player.id}" type="button" ${hasVoted ? "disabled" : ""}>
+            <button class="vote-card" data-target-id="${player.id}" type="button" ${disabled ? "disabled" : ""}>
               ${escapeHtml(player.name)}
             </button>
           `,
@@ -244,11 +278,18 @@ function renderActionForm() {
   const alreadySubmitted =
     state.viewer &&
     ((state.phase === "spark" && state.viewer.submissions.spark) ||
-      (state.phase === "final_statements" && state.viewer.submissions.finalStatement));
-  const canAct = Boolean(state.viewer && config.enabled && !alreadySubmitted);
+      (state.phase === "final_statements" && state.viewer.submissions.finalStatement) ||
+      (state.phase === "tiebreak_statements" && state.viewer.submissions.tiebreakStatement));
+  const isTiebreakStatementForViewer =
+    state.phase !== "tiebreak_statements" || state.tiebreakPlayerIds.includes(state.viewer?.id);
+  const canAct = Boolean(state.viewer && config.enabled && !alreadySubmitted && isTiebreakStatementForViewer);
 
   actionLabel.textContent = config.label;
-  actionInput.placeholder = alreadySubmitted ? "Submitted. Waiting for the room..." : config.placeholder;
+  actionInput.placeholder = !isTiebreakStatementForViewer
+    ? "Waiting for tied players..."
+    : alreadySubmitted
+      ? "Submitted. Waiting for the room..."
+      : config.placeholder;
   actionInput.disabled = !canAct;
   sendButton.disabled = !canAct;
   sendButton.textContent = alreadySubmitted ? "Waiting" : config.button;
@@ -351,7 +392,7 @@ votePanel.addEventListener("click", (event) => {
   }
 
   postAction({
-    type: "CAST_VOTE",
+    type: state.phase === "tiebreak_vote" ? "CAST_TIEBREAK_VOTE" : "CAST_VOTE",
     targetId: button.dataset.targetId,
   });
 });

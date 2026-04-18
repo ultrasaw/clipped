@@ -158,6 +158,24 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
       });
     }
 
+    if (room.phase === "tiebreak_statements") {
+      const tiedAgents = agents.filter((agent) => room.tiebreakPlayerIds.includes(agent.id));
+
+      tiedAgents.forEach((agent, index) => {
+        schedule(`${agent.name} tiebreak statement`, () => {
+          const target = pick(livingTargets(room, agent.id));
+
+          submitAiAction(room, {
+            type: "SUBMIT_TIEBREAK",
+            playerId: agent.id,
+            text: target
+              ? fillTemplate(pick(FINAL_TEMPLATES), target)
+              : "I still think this read is too convenient.",
+          });
+        }, 500 + index * 400);
+      });
+    }
+
     if (room.phase === "vote") {
       agents.forEach((agent, index) => {
         schedule(`${agent.name} vote`, () => {
@@ -170,6 +188,32 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
 
           submitAiAction(room, {
             type: "CAST_VOTE",
+            voterId: agent.id,
+            targetId: target.id,
+          });
+        }, 650 + index * 450);
+      });
+    }
+
+    if (room.phase === "tiebreak_vote") {
+      const votingAgents = agents.filter((agent) => !room.tiebreakPlayerIds.includes(agent.id));
+
+      votingAgents.forEach((agent, index) => {
+        schedule(`${agent.name} tiebreak vote`, () => {
+          const target = pick(
+            room.tiebreakPlayerIds
+              .map((playerId) => room.players.find((player) => player.id === playerId))
+              .filter(Boolean)
+              .filter((player) => player.status === "alive"),
+          );
+
+          if (!target) {
+            logger?.warn("agent has no tiebreak vote target", { agent: agent.name });
+            return;
+          }
+
+          submitAiAction(room, {
+            type: "CAST_TIEBREAK_VOTE",
             voterId: agent.id,
             targetId: target.id,
           });

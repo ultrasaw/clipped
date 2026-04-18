@@ -109,6 +109,8 @@ The client and agents both submit game actions:
 - `SEND_CHAT`
 - `SUBMIT_FINAL`
 - `CAST_VOTE`
+- `SUBMIT_TIEBREAK`
+- `CAST_TIEBREAK_VOTE`
 - `RESET_ROOM`
 
 The game controller validates every action before mutating room state.
@@ -179,6 +181,8 @@ lobby
 -> chat
 -> final_statements
 -> vote
+-> tiebreak_statements, if vote is tied
+-> tiebreak_vote, if vote is tied
 -> reveal
 -> next round or game_over
 ```

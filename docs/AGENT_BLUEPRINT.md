@@ -27,6 +27,8 @@ Agents act during:
 - `chat`
 - `final_statements`
 - `vote`
+- `tiebreak_statements`
+- `tiebreak_vote`
 
 Agents should not act during:
 
@@ -143,6 +145,14 @@ class MyAgent extends BaseAgent {
   async getVoteAction(context) {
     return null;
   }
+
+  async getTiebreakStatementAction(context) {
+    return null;
+  }
+
+  async getTiebreakVoteAction(context) {
+    return null;
+  }
 }
 ```
 
@@ -214,6 +224,43 @@ Helper:
 createVoteAction(agent.id, targetId);
 ```
 
+### Submit Tiebreak Statement
+
+Only tied players may submit this action.
+
+```js
+{
+  type: "SUBMIT_TIEBREAK",
+  playerId: "ai_1",
+  text: "This case is too convenient."
+}
+```
+
+Helper:
+
+```js
+createTiebreakStatementAction(agent.id, "This case is too convenient.");
+```
+
+### Cast Tiebreak Vote
+
+Only non-tied alive players may submit this action. The target must be one of
+the tied players.
+
+```js
+{
+  type: "CAST_TIEBREAK_VOTE",
+  voterId: "ai_3",
+  targetId: "ai_1"
+}
+```
+
+Helper:
+
+```js
+createTiebreakVoteAction(agent.id, targetId);
+```
+
 ## Suggested Agent Class
 
 ```js
@@ -223,6 +270,8 @@ const {
   createChatAction,
   createFinalStatementAction,
   createVoteAction,
+  createTiebreakStatementAction,
+  createTiebreakVoteAction,
 } = require("./agentContract");
 
 class PersonalityAgent extends BaseAgent {
@@ -264,6 +313,20 @@ class PersonalityAgent extends BaseAgent {
     }
 
     return createVoteAction(this.id, target.id);
+  }
+
+  async getTiebreakStatementAction(context) {
+    return createTiebreakStatementAction(this.id, "This tie feels too convenient.");
+  }
+
+  async getTiebreakVoteAction(context) {
+    const target = context.legalTargets[0];
+
+    if (!target) {
+      return null;
+    }
+
+    return createTiebreakVoteAction(this.id, target.id);
   }
 }
 ```
@@ -337,6 +400,8 @@ To stay compatible with the game system:
 - Always return game actions, not direct state mutations.
 - Always use the agent's own player ID.
 - Only target IDs from `context.legalTargets`.
+- During `tiebreak_vote`, only target tied players.
+- During `tiebreak_statements`, only tied agents should return a statement.
 - Return `null` or `[]` if no legal action exists.
 - Keep chat messages under 500 characters.
 - Keep spark answers short.

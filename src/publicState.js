@@ -9,6 +9,7 @@ function getPublicState(room, viewerPlayerId = null) {
     sparkPrompt: room.sparkPrompt,
     phaseStartedAt: room.phaseStartedAt,
     phaseEndsAt: room.phaseEndsAt,
+    tiebreakPlayerIds: room.tiebreakPlayerIds,
     players: room.players.map((player) => ({
       id: player.id,
       name: player.name,
@@ -29,12 +30,15 @@ function getPublicState(room, viewerPlayerId = null) {
             spark: Boolean(room.sparkAnswers[viewer.id]),
             finalStatement: Boolean(room.finalStatements[viewer.id]),
             vote: Boolean(room.votes[viewer.id]),
+            tiebreakStatement: Boolean(room.tiebreakStatements[viewer.id]),
+            tiebreakVote: Boolean(room.tiebreakVotes[viewer.id]),
           },
         }
       : null,
     messages: room.messages,
     sparkAnswers: room.phase === "spark" ? {} : room.sparkAnswers,
     finalStatements: room.phase === "final_statements" ? {} : room.finalStatements,
+    tiebreakStatements: room.phase === "tiebreak_statements" ? {} : room.tiebreakStatements,
     revealedVotes: room.revealedVotes,
     lastEjection: room.lastEjection,
     result: room.result,
