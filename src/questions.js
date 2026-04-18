@@ -8,6 +8,10 @@ function normalizeQuestion(value) {
     .replace(/^["']|["']$/g, "");
 }
 
+function joinSections(parts) {
+  return parts.filter(Boolean).join("\n\n");
+}
+
 function extractOutputText(payload) {
   if (typeof payload.output_text === "string" && payload.output_text.trim()) {
     return payload.output_text;
@@ -50,6 +54,16 @@ async function generateText(prompt) {
   return extractOutputText(payload);
 }
 
+function buildIdentityBlock(name, personality, gameplayPrompt = "") {
+  return [
+    `Name: ${String(name || "").trim() || "Player"}`,
+    `Personality: ${String(personality || "").trim() || "neutral"}`,
+    gameplayPrompt ? `Gameplay guidance: ${String(gameplayPrompt).trim()}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 async function createQuestion() {
   const question = normalizeQuestion(
     await generateText([
@@ -86,7 +100,7 @@ async function createQuestion() {
   return question;
 }
 
-async function answerQuestion(name, personality, question) {
+async function answerQuestion(name, personality, question, gameplayPrompt = "") {
   const answer = normalizeQuestion(
     await generateText([
       {
@@ -97,6 +111,7 @@ async function answerQuestion(name, personality, question) {
             text: [
               "You are writing a short answer in a social deduction chat game.",
               "Stay in character using the provided personality.",
+              "Follow the gameplay guidance if provided.",
               "Write like a human player, not an assistant.",
               "Return exactly one concise answer with no preamble, labels, or quotation marks.",
               "Keep it natural and under 80 characters when possible.",
@@ -109,11 +124,10 @@ async function answerQuestion(name, personality, question) {
         content: [
           {
             type: "input_text",
-            text: [
-              `Name: ${String(name || "").trim() || "Player"}`,
-              `Personality: ${String(personality || "").trim() || "neutral"}`,
+            text: joinSections([
+              buildIdentityBlock(name, personality, gameplayPrompt),
               `Question: ${String(question || "").trim()}`,
-            ].join("\n"),
+            ]),
           },
         ],
       },
@@ -127,7 +141,247 @@ async function answerQuestion(name, personality, question) {
   return answer;
 }
 
+function summarizeContext(context) {
+  if (!context) {
+    return "";
+  }
+
+  const gameSummary = [
+    context.game?.phase ? `Phase: ${context.game.phase}` : "",
+    typeof context.game?.round === "number" && typeof context.game?.maxRounds === "number"
+      ? `Round: ${context.game.round}/${context.game.maxRounds}`
+      : "",
+    context.game?.sparkPrompt ? `Spark prompt: ${context.game.sparkPrompt}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const playersSummary = Array.isArray(context.players)
+    ? context.players
+        .map((player) =>
+          [
+            player.name,
+            `id=${player.id}`,
+            player.isSelf ? "self" : "",
+            player.status ? `status=${player.status}` : "",
+            player.revealedRole ? `revealed=${player.revealedRole}` : "",
+          ]
+            .filter(Boolean)
+            .join(", "),
+        )
+        .join("\n")
+    : "";
+
+  const targetsSummary = Array.isArray(context.legalTargets)
+    ? context.legalTargets
+        .map((target) =>
+          [
+            target.name,
+            `id=${target.id}`,
+            target.status ? `status=${target.status}` : "",
+            target.revealedRole ? `revealed=${target.revealedRole}` : "",
+          ]
+            .filter(Boolean)
+            .join(", "),
+        )
+        .join("\n")
+    : "";
+
+  const recentMessages = Array.isArray(context.messages)
+    ? context.messages
+        .slice(-8)
+        .map((message) => `${message.sender}: ${message.text}`)
+        .join("\n")
+    : "";
+
+  return joinSections([
+    gameSummary,
+    playersSummary ? `Players:\n${playersSummary}` : "",
+    targetsSummary ? `Legal targets:\n${targetsSummary}` : "",
+    recentMessages ? `Recent messages:\n${recentMessages}` : "",
+  ]);
+}
+
+async function createChatMessage(name, personality, gameplayPrompt, context) {
+  const message = normalizeQuestion(
+    await generateText([
+      {
+        role: "developer",
+        content: [
+          {
+            type: "input_text",
+            text: [
+              "You are an in-character player in a social deduction chat game.",
+              "Write exactly one public chat message.",
+              "Keep it natural, suspicious, and conversational.",
+              "Do not add labels, quotation marks, or explanations.",
+              "Keep it under 180 characters.",
+            ].join(" "),
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: joinSections([
+              buildIdentityBlock(name, personality, gameplayPrompt),
+              summarizeContext(context),
+            ]),
+          },
+        ],
+      },
+    ]),
+  );
+
+  if (!message) {
+    throw new Error("OpenAI returned an empty chat message.");
+  }
+
+  return message;
+}
+
+async function createFinalStatement(name, personality, gameplayPrompt, context) {
+  const statement = normalizeQuestion(
+    await generateText([
+      {
+        role: "developer",
+        content: [
+          {
+            type: "input_text",
+            text: [
+              "You are making a final statement in a social deduction game.",
+              "Write exactly one short final statement.",
+              "It should be a defense, accusation, or final read.",
+              "Do not add labels, quotation marks, or explanations.",
+              "Keep it under 220 characters.",
+            ].join(" "),
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: joinSections([
+              buildIdentityBlock(name, personality, gameplayPrompt),
+              summarizeContext(context),
+            ]),
+          },
+        ],
+      },
+    ]),
+  );
+
+  if (!statement) {
+    throw new Error("OpenAI returned an empty final statement.");
+  }
+
+  return statement;
+}
+
+async function createTiebreakStatement(name, personality, gameplayPrompt, context) {
+  const statement = normalizeQuestion(
+    await generateText([
+      {
+        role: "developer",
+        content: [
+          {
+            type: "input_text",
+            text: [
+              "You are in the tiebreak statement phase of a social deduction game.",
+              "Write exactly one short tiebreak statement.",
+              "Sound like a player under pressure and make a final case.",
+              "Do not add labels, quotation marks, or explanations.",
+              "Keep it under 200 characters.",
+            ].join(" "),
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: joinSections([
+              buildIdentityBlock(name, personality, gameplayPrompt),
+              summarizeContext(context),
+            ]),
+          },
+        ],
+      },
+    ]),
+  );
+
+  if (!statement) {
+    throw new Error("OpenAI returned an empty tiebreak statement.");
+  }
+
+  return statement;
+}
+
+async function chooseVoteTarget(name, personality, gameplayPrompt, context) {
+  const legalTargets = Array.isArray(context?.legalTargets) ? context.legalTargets : [];
+
+  if (legalTargets.length === 0) {
+    throw new Error("No legal vote targets were provided.");
+  }
+
+  const rawTarget = normalizeQuestion(
+    await generateText([
+      {
+        role: "developer",
+        content: [
+          {
+            type: "input_text",
+            text: [
+              "You are choosing a vote target in a social deduction game.",
+              "Choose exactly one player from the legal targets.",
+              "Reply with the chosen target id only.",
+              "Do not add any other text.",
+            ].join(" "),
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: joinSections([
+              buildIdentityBlock(name, personality, gameplayPrompt),
+              summarizeContext(context),
+            ]),
+          },
+        ],
+      },
+    ]),
+  );
+
+  const directMatch = legalTargets.find((target) => target.id === rawTarget);
+
+  if (directMatch) {
+    return directMatch.id;
+  }
+
+  const fuzzyMatch = legalTargets.find(
+    (target) => rawTarget.includes(target.id) || rawTarget.toLowerCase() === String(target.name || "").toLowerCase(),
+  );
+
+  if (!fuzzyMatch) {
+    throw new Error("OpenAI did not return a valid legal target.");
+  }
+
+  return fuzzyMatch.id;
+}
+
 module.exports = {
   answerQuestion,
+  chooseVoteTarget,
+  createChatMessage,
+  createFinalStatement,
   createQuestion,
+  createTiebreakStatement,
 };
