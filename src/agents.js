@@ -209,7 +209,7 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
 
     if (room.phase === "spark") {
       agents.forEach((agent, index) => {
-        schedule(`${agent.name} spark answer`, () => runAgentMethod(room, agent, "getSparkAction"), 500 + index * 350);
+        schedule(`${agent.name} spark answer`, () => runAgentMethod(room, agent, "getSparkAction"), 4_500 + index * 1_500);
       });
     }
 
