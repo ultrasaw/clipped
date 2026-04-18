@@ -135,9 +135,32 @@ function buildVoiceGuidance() {
     "Write with believable human looseness rather than polished assistant prose.",
     "It is okay to occasionally include a tiny typo, inconsistent capitalization, dropped punctuation, or slightly uneven phrasing if it fits this player.",
     "Do that lightly and inconsistently; the message should still be easy to read.",
-    "Do not imitate another player's style or collapse into a generic game-bot voice.",
+    "When human reply samples are provided, use them as the disguise anchor for length, specificity, punctuation, and casualness without copying exact phrases.",
+    "Do not copy another player's exact wording or collapse into a generic game-bot voice.",
     "Always sound like a real player in a live lobby, never an assistant or narrator.",
   ].join(" ");
+}
+
+function summarizeHumanSignals(context) {
+  if (!context) {
+    return "";
+  }
+
+  const humanPlayers = Array.isArray(context.humanPlayers) ? context.humanPlayers : [];
+  const humanReplies = Array.isArray(context.humanReplySamples) ? context.humanReplySamples : [];
+  const playersSummary = humanPlayers.length
+    ? humanPlayers.map((player) => `${player.name} (id=${player.id}, status=${player.status})`).join("\n")
+    : "";
+  const repliesSummary = humanReplies.length
+    ? humanReplies.map((reply) => `${reply.playerName} [${reply.kind}]: ${reply.text}`).join("\n")
+    : "";
+
+  return joinSections([
+    playersSummary ? `Hidden human players:\n${playersSummary}` : "",
+    repliesSummary
+      ? `Human reply samples to mimic:\n${repliesSummary}`
+      : "Human reply samples to mimic: none yet. If nobody has spoken, stay casual and blend-ready.",
+  ]);
 }
 
 async function createQuestion() {
@@ -208,6 +231,7 @@ async function answerQuestion(name, personality, question, gameplayPrompt = "", 
             type: "input_text",
             text: joinSections([
               buildIdentityBlock(name, personality, gameplayPrompt),
+              summarizeContext(options.context),
               `Question: ${String(question || "").trim()}`,
             ]),
           },
@@ -285,6 +309,7 @@ function summarizeContext(context) {
   return joinSections([
     gameSummary,
     playersSummary ? `Players:\n${playersSummary}` : "",
+    summarizeHumanSignals(context),
     targetsSummary ? `Legal targets:\n${targetsSummary}` : "",
     recentMessages ? `Recent messages:\n${recentMessages}` : "",
   ]);

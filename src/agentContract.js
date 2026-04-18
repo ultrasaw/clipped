@@ -62,6 +62,7 @@ class BaseAgent {
       context.game.sparkPrompt,
       this.gameplayPrompt,
       {
+        context,
         phase: context.game.phase,
         round: context.game.round,
       },
