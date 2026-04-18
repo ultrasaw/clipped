@@ -88,13 +88,13 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
     return agent;
   }
 
-  function submitAiAction(room, action) {
+  async function submitAiAction(room, action) {
     if (submitAction) {
-      submitAction(action, { source: "agent" });
+      await submitAction(action, { source: "agent" });
       return;
     }
 
-    const result = applyAction(room, action, { source: "agent" });
+    const result = await applyAction(room, action, { source: "agent" });
 
     if (!result.ok) {
       room.errors.push(result.error);
@@ -150,7 +150,7 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
         text: action.text,
         targetId: action.targetId,
       });
-      submitAiAction(room, action);
+      await submitAiAction(room, action);
     }
   }
 

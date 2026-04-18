@@ -1,6 +1,7 @@
 const crypto = require("node:crypto");
 const { createAiPlayers } = require("./agents");
 const { GAME_CONFIG } = require("./gameConfig");
+const { createQuestion } = require("./questions");
 
 const PHASES = [
   "lobby",
@@ -13,14 +14,6 @@ const PHASES = [
   "tiebreak_vote",
   "reveal",
   "game_over",
-];
-
-const SPARK_PROMPTS = [
-  "Name one thing people pretend to like.",
-  "Say one small thing that annoys you.",
-  "Pick one: morning or night.",
-  "What's worse: too hot or too cold?",
-  "Say one habit you have.",
 ];
 
 function createDemoRoom() {
@@ -125,11 +118,7 @@ function addPlayerMessage(room, player, text, kind = "chat") {
   }
 }
 
-function pickSparkPrompt() {
-  return SPARK_PROMPTS[Math.floor(Math.random() * SPARK_PROMPTS.length)];
-}
-
-function enterPhase(room, nextPhase) {
+async function enterPhase(room, nextPhase) {
   const previousPhase = room.phase;
 
   room.phase = nextPhase;
@@ -146,7 +135,7 @@ function enterPhase(room, nextPhase) {
 
   if (nextPhase === "spark") {
     room.round += 1;
-    room.sparkPrompt = pickSparkPrompt();
+    room.sparkPrompt = await createQuestion();
     room.sparkAnswers = {};
     room.finalStatements = {};
     room.votes = {};
@@ -190,7 +179,7 @@ function enterPhase(room, nextPhase) {
   }
 }
 
-function startGame(room) {
+async function startGame(room) {
   const humans = room.players.filter((player) => player.role === "human");
 
   if (humans.length < GAME_CONFIG.players.humansRequired) {
@@ -212,33 +201,33 @@ function startGame(room) {
     aiCount: GAME_CONFIG.players.aiCount,
     playerCount: room.players.length,
   });
-  enterPhase(room, "spark");
+  await enterPhase(room, "spark");
 
   return { ok: true };
 }
 
-function advancePhase(room) {
+async function advancePhase(room) {
   if (room.phase === "lobby") {
     return startGame(room);
   }
 
   if (room.phase === "spark") {
-    enterPhase(room, "spark_reveal");
+    await enterPhase(room, "spark_reveal");
     return { ok: true };
   }
 
   if (room.phase === "spark_reveal") {
-    enterPhase(room, "chat");
+    await enterPhase(room, "chat");
     return { ok: true };
   }
 
   if (room.phase === "chat") {
-    enterPhase(room, "final_statements");
+    await enterPhase(room, "final_statements");
     return { ok: true };
   }
 
   if (room.phase === "final_statements") {
-    enterPhase(room, "vote");
+    await enterPhase(room, "vote");
     return { ok: true };
   }
 
@@ -246,32 +235,32 @@ function advancePhase(room) {
     const result = resolveVote(room);
 
     if (result.outcome === "tie") {
-      enterPhase(room, "tiebreak_statements");
+      await enterPhase(room, "tiebreak_statements");
       return { ok: true };
     }
 
-    enterPhase(room, "reveal");
+    await enterPhase(room, "reveal");
     return { ok: true };
   }
 
   if (room.phase === "tiebreak_statements") {
-    enterPhase(room, "tiebreak_vote");
+    await enterPhase(room, "tiebreak_vote");
     return { ok: true };
   }
 
   if (room.phase === "tiebreak_vote") {
     resolveTiebreakVote(room);
-    enterPhase(room, "reveal");
+    await enterPhase(room, "reveal");
     return { ok: true };
   }
 
   if (room.phase === "reveal") {
     if (isGameOver(room)) {
-      enterPhase(room, "game_over");
+      await enterPhase(room, "game_over");
       return { ok: true };
     }
 
-    enterPhase(room, "spark");
+    await enterPhase(room, "spark");
     return { ok: true };
   }
 
@@ -662,7 +651,7 @@ function resetRoom(room) {
   return { ok: true };
 }
 
-function applyAction(room, action, context = {}) {
+async function applyAction(room, action, context = {}) {
   switch (action.type) {
     case "JOIN_ROOM":
       return joinRoom(room, action, context);
