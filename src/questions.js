@@ -72,7 +72,9 @@ async function generateText(prompt) {
     details = arguments[1];
   }
 
-  if (!process.env.OPENAI_API_KEY) {
+  const openAiApiKey = process.env.OPENAI_API_KEY;
+
+  if (!openAiApiKey) {
     throw new Error("OPENAI_API_KEY is required to generate text.");
   }
 
@@ -86,7 +88,7 @@ async function generateText(prompt) {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      authorization: `Bearer ${openAiApiKey}`,
     },
     body: JSON.stringify({
       model: DEFAULT_MODEL,
@@ -123,6 +125,16 @@ function buildIdentityBlock(name, personality, gameplayPrompt = "") {
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function buildVoiceGuidance() {
+  return [
+    "Keep this player's cadence, habits, and level of confidence consistent.",
+    "Let the personality shape wording and rhythm, not just suspicion content.",
+    "Vary phrasing naturally from round to round, but stay recognizably the same person.",
+    "Do not imitate another player's style or collapse into a generic game-bot voice.",
+    "Always sound like a real player in a live lobby, never an assistant or narrator.",
+  ].join(" ");
 }
 
 async function createQuestion() {
@@ -177,6 +189,7 @@ async function answerQuestion(name, personality, question, gameplayPrompt = "", 
               "You are writing a short answer in a social deduction chat game.",
               "Stay in character using the provided personality.",
               "Follow the gameplay guidance if provided.",
+              buildVoiceGuidance(),
               "Write like a human player, not an assistant.",
               "Return exactly one concise answer with no preamble, labels, or quotation marks.",
               "Keep it very short, ideally 1 to 4 words and under 40 characters.",
@@ -284,7 +297,8 @@ async function createChatMessage(name, personality, gameplayPrompt, context) {
             text: [
               "You are an in-character player in a social deduction chat game.",
               "Write exactly one public chat message.",
-              "Keep it natural, suspicious, and conversational.",
+              buildVoiceGuidance(),
+              "Keep it natural, suspicious, and conversational for this specific player.",
               "Do not add labels, quotation marks, or explanations.",
               "Keep it under 180 characters.",
             ].join(" "),
@@ -330,6 +344,7 @@ async function createFinalStatement(name, personality, gameplayPrompt, context) 
             text: [
               "You are making a final statement in a social deduction game.",
               "Write exactly one short final statement.",
+              buildVoiceGuidance(),
               "It should be a defense, accusation, or final read.",
               "Do not add labels, quotation marks, or explanations.",
               "Keep it under 220 characters.",
@@ -376,6 +391,7 @@ async function createTiebreakStatement(name, personality, gameplayPrompt, contex
             text: [
               "You are in the tiebreak statement phase of a social deduction game.",
               "Write exactly one short tiebreak statement.",
+              buildVoiceGuidance(),
               "Sound like a player under pressure and make a final case.",
               "Do not add labels, quotation marks, or explanations.",
               "Keep it under 200 characters.",
@@ -428,6 +444,7 @@ async function chooseVoteTarget(name, personality, gameplayPrompt, context) {
             text: [
               "You are choosing a vote target in a social deduction game.",
               "Choose exactly one player from the legal targets.",
+              "Use the provided personality and gameplay guidance to decide who feels most suspect, but reply with the chosen target id only.",
               "Reply with the chosen target id only.",
               "Do not add any other text.",
             ].join(" "),
