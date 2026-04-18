@@ -48,12 +48,16 @@ Wait until `clipped.chat` resolves publicly before requesting certificates.
 
 ## 3. Install ingress-nginx
 
-Apply the upstream bare-metal manifest, then patch the controller to use the
-node network directly:
+Install the chart with `hostNetwork` enabled so the controller binds directly
+to ports `80` and `443` on the Hetzner node:
 
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.12.1/deploy/static/provider/baremetal/deploy.yaml
-kubectl apply -f k8s/ingress-nginx-hostnetwork-patch.yaml
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo update
+helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+  --namespace ingress-nginx \
+  --create-namespace \
+  -f k8s/helm/ingress-nginx-values.yaml
 kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx
 ```
 
@@ -63,14 +67,18 @@ controller is ready, the node public IP can answer HTTP and HTTPS traffic.
 ## 4. Install cert-manager
 
 ```bash
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.yaml
+helm repo add jetstack https://charts.jetstack.io
+helm repo update
+helm upgrade --install cert-manager jetstack/cert-manager \
+  --namespace cert-manager \
+  --create-namespace \
+  -f k8s/helm/cert-manager-values.yaml
 kubectl rollout status deployment/cert-manager -n cert-manager
 kubectl rollout status deployment/cert-manager-webhook -n cert-manager
 kubectl rollout status deployment/cert-manager-cainjector -n cert-manager
 ```
 
-Update `k8s/cluster-issuer.yaml` and replace `your-email@example.com` with the
-real ACME contact email, then apply:
+Then apply the ACME issuer:
 
 ```bash
 kubectl apply -f k8s/cluster-issuer.yaml
@@ -82,6 +90,9 @@ Apply the namespace, app, service, and ingress:
 
 ```bash
 kubectl apply -f k8s/namespace.yaml
+# Copy k8s/openai-api.secret.example.yaml to k8s/openai-api.secret.yaml,
+# set the real key, then:
+kubectl apply -f k8s/openai-api.secret.yaml
 kubectl apply -f k8s/deployment.yaml
 kubectl apply -f k8s/service.yaml
 kubectl apply -f k8s/ingress.yaml
@@ -111,3 +122,29 @@ Open `https://clipped.chat` in the browser once the certificate is issued.
   longer for `/events`.
 - This is a single-node deployment. If you later add nodes or a managed
   load balancer, the ingress exposure strategy should change.
+- `clipped.chat` must resolve to the Hetzner node public IPv4 before
+  Let's Encrypt can issue `clipped-chat-tls`.
+
+## GitHub Actions deploy
+
+The repo includes [deploy.yml](/Users/doom/Documents/_projects/clipped/.github/workflows/deploy.yml:1)
+to build and deploy on every push to `main`.
+
+Required GitHub repository secrets:
+
+- `DOCKERHUB_USERNAME`: Docker Hub username with push access to `bandpassednoise/clipped`
+- `DOCKERHUB_TOKEN`: Docker Hub access token or password
+- `KUBE_CONFIG`: the full contents of a kubeconfig that can reach the Hetzner cluster
+- `OPENAI_API_KEY`: runtime OpenAI API key injected into the `openai-api` Kubernetes secret
+
+Manual secret manifest files matching `k8s/*.secret.yaml` are gitignored. Use
+[openai-api.secret.example.yaml](/Users/doom/Documents/_projects/clipped/k8s/openai-api.secret.example.yaml:1)
+as the template for your local `k8s/openai-api.secret.yaml`.
+
+The workflow:
+
+- builds and pushes `linux/amd64` images tagged as `latest` and `<git-sha>`
+- creates or updates the `openai-api` Kubernetes secret in namespace `clipped`
+- applies `k8s/namespace.yaml`, `k8s/service.yaml`, `k8s/ingress.yaml`, and `k8s/deployment.yaml`
+- updates the deployment image to the pushed SHA tag
+- waits for the rollout to complete

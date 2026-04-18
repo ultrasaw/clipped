@@ -33,27 +33,57 @@ terragrunt run --all apply --non-interactive
 
 ## Post-deploy: retrieve and merge kubeconfig (~3 min)
 
-Wait for cloud-init to finish, then fetch the kubeconfig, rename the `default` context to `hetzner-minimal`, and merge it into your main kubeconfig:
+Wait for cloud-init to finish, then fetch the kubeconfig into a dedicated file,
+rename the default k3s objects to a unique context name, and merge it into your
+active kubeconfig set.
+
+This flow is idempotent:
+
+- it overwrites the dedicated Hetzner kubeconfig file on each run
+- it avoids collisions with older `hetzner-minimal` entries
+- it preserves existing contexts from your current `KUBECONFIG` or `~/.kube/config`
 
 ```bash
+mkdir -p ~/.ssh ~/.kube
+
 cd k3s
 terragrunt output -raw ssh_private_key > ~/.ssh/k3s-minimal.pem
 chmod 600 ~/.ssh/k3s-minimal.pem
 
 K3S_IP=$(terragrunt output -raw k3s_public_ip)
+KUBE_CONTEXT=hetzner-minimal-k3s
+KUBE_FILE="$HOME/.kube/${KUBE_CONTEXT}.yaml"
+BASE_KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
 
 ssh -o StrictHostKeyChecking=no -i ~/.ssh/k3s-minimal.pem root@$K3S_IP \
-  'sed "s/127.0.0.1/'$K3S_IP'/g" /etc/rancher/k3s/k3s.yaml' \
-  | sed 's/: default$/: hetzner-minimal/g' \
-  > ~/.kube/k3s-minimal.yaml
+  'cat /etc/rancher/k3s/k3s.yaml' \
+  | sed \
+      -e "s/127.0.0.1/${K3S_IP}/g" \
+      -e "s/name: default$/name: ${KUBE_CONTEXT}/g" \
+      -e "s/current-context: default$/current-context: ${KUBE_CONTEXT}/g" \
+      -e "s/cluster: default$/cluster: ${KUBE_CONTEXT}/g" \
+      -e "s/user: default$/user: ${KUBE_CONTEXT}/g" \
+  > "$KUBE_FILE"
 
-KUBECONFIG=~/.kube/config:~/.kube/k3s-minimal.yaml \
+KUBECONFIG="${BASE_KUBECONFIG}:$KUBE_FILE" \
   kubectl config view --flatten > ~/.kube/config.merged \
   && mv ~/.kube/config.merged ~/.kube/config
 
-kubectl config use-context hetzner-minimal
+export KUBECONFIG="$HOME/.kube/config"
+kubectl config use-context "${KUBE_CONTEXT}"
 kubectl get nodes
 ```
+
+If you previously exported a custom `KUBECONFIG`, keep using the merged file for
+plain `kubectl` commands in the current shell:
+
+```bash
+export KUBECONFIG="$HOME/.kube/config"
+```
+
+If you destroy and recreate the cluster later, rerun the same commands above.
+They will refresh the dedicated Hetzner kubeconfig file and keep your other
+contexts accessible.
 
 ## SSH access
 
@@ -97,8 +127,12 @@ Create a Porkbun DNS `A` record for `clipped.chat` pointing to that IP.
 From the repo root:
 
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.12.1/deploy/static/provider/baremetal/deploy.yaml
-kubectl apply -f k8s/ingress-nginx-hostnetwork-patch.yaml
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo update
+helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+  --namespace ingress-nginx \
+  --create-namespace \
+  -f k8s/helm/ingress-nginx-values.yaml
 kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx
 ```
 
@@ -108,13 +142,18 @@ controller is ready the node public IP can serve web traffic directly.
 ### 4. Install cert-manager
 
 ```bash
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.yaml
+helm repo add jetstack https://charts.jetstack.io
+helm repo update
+helm upgrade --install cert-manager jetstack/cert-manager \
+  --namespace cert-manager \
+  --create-namespace \
+  -f k8s/helm/cert-manager-values.yaml
 kubectl rollout status deployment/cert-manager -n cert-manager
 kubectl rollout status deployment/cert-manager-webhook -n cert-manager
 kubectl rollout status deployment/cert-manager-cainjector -n cert-manager
 ```
 
-Update the ACME email in `k8s/cluster-issuer.yaml`, then apply:
+Apply the ACME issuer:
 
 ```bash
 kubectl apply -f k8s/cluster-issuer.yaml
@@ -138,6 +177,9 @@ kubectl get certificate -n clipped
 curl -sS http://clipped.chat/state
 curl -sS https://clipped.chat/state
 ```
+
+`clipped.chat` must resolve to the Hetzner node public IPv4 before Let's
+Encrypt can issue `clipped-chat-tls`.
 
 Once the certificate is issued, the game should be reachable at:
 
