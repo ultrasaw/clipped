@@ -897,11 +897,19 @@ body[data-result="humans-partial"] #resultsEyebrow {
   height: 0.35rem;
 }
 
-.spark-panel,
 .vote-panel {
   border-bottom: 1px solid var(--line);
   padding: 0.65rem 1.25rem;
   background: rgba(20, 18, 15, 0.4);
+}
+
+.spark-panel {
+  border-bottom: 1px solid rgba(224, 107, 69, 0.18);
+  padding: 0.65rem 1.25rem;
+  background:
+    radial-gradient(circle at 0% 60%, rgba(224, 107, 69, 0.1), transparent 14rem),
+    linear-gradient(135deg, rgba(212, 137, 42, 0.07), transparent 60%),
+    rgba(38, 32, 24, 0.9);
 }
 
 .spark-panel {
@@ -942,10 +950,10 @@ body[data-result="humans-partial"] #resultsEyebrow {
   gap: 0.45rem;
   overflow: hidden;
   border: none;
-  border-left: 2px solid rgba(224, 107, 69, 0.35);
+  border-left: 2px solid rgba(224, 107, 69, 0.45);
   border-radius: 0.35rem;
   padding: 0.28rem 0.55rem;
-  background: rgba(28, 26, 20, 0.65);
+  background: rgba(22, 19, 14, 0.7);
   box-shadow: none;
 }
 
