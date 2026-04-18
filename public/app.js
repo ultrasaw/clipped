@@ -17,7 +17,6 @@ const gameScreen = document.querySelector("#gameScreen");
 const resultsScreen = document.querySelector("#resultsScreen");
 const lobbyTitle = document.querySelector("#lobbyTitle");
 const lobbyDescription = document.querySelector("#lobbyDescription");
-const lobbyCountdown = document.querySelector("#lobbyCountdown");
 const joinForm = document.querySelector("#joinForm");
 const nameInput = document.querySelector("#nameInput");
 const advanceButton = document.querySelector("#advanceButton");
@@ -74,7 +73,7 @@ const phaseCopy = {
   lobby: {
     kicker: "Gathering the room",
     title: "Waiting for the room",
-    instruction: "Join with a name. Once two humans are in, the game starts automatically.",
+    instruction: "Join with a name. Once enough humans are in, the game starts automatically.",
   },
   spark: {
     kicker: "Quick instinct",
@@ -303,46 +302,13 @@ function renderScreens(screen = getScreen()) {
 function renderLobby() {
   const humanPlayers = state.players.filter((player) => !player.revealedRole);
   const joinedCount = humanPlayers.length;
-  const needed = Math.max(0, 2 - joinedCount);
-
-  if (state.phaseEndsAt) {
-    lobbyTitle.textContent = "Game starts soon";
-    lobbyDescription.textContent =
-      "Two humans are in. Get ready. The room will fill with AI voices when the countdown ends.";
-    renderLobbyCountdown();
-    return;
-  }
+  const humansRequired = state.config?.humansRequired || 2;
+  const needed = Math.max(0, humansRequired - joinedCount);
 
   lobbyTitle.textContent = needed ? "Join the demo room" : "Ready to begin";
   lobbyDescription.textContent = needed
-    ? `${needed} more human player${needed === 1 ? "" : "s"} needed before the countdown starts.`
-    : "The game will start automatically in a moment.";
-  lobbyCountdown.classList.add("hidden");
-  lobbyCountdown.innerHTML = "";
-}
-
-function renderLobbyCountdown() {
-  if (!state.phaseEndsAt) {
-    lobbyCountdown.classList.add("hidden");
-    lobbyCountdown.innerHTML = "";
-    return;
-  }
-
-  const remainingMs = Math.max(0, state.phaseEndsAt - Date.now());
-  const seconds = Math.ceil(remainingMs / 1000);
-  const progress = getTimerProgress();
-
-  lobbyCountdown.classList.remove("hidden");
-  lobbyCountdown.innerHTML = `
-    <div class="countdown-copy">
-      <span>Starting in</span>
-      <strong>${String(seconds).padStart(2, "0")}</strong>
-      <span>seconds</span>
-    </div>
-    <div class="countdown-track" aria-hidden="true">
-      <span class="countdown-fill" style="width: ${progress}%"></span>
-    </div>
-  `;
+    ? `${needed} more human player${needed === 1 ? "" : "s"} needed before the game starts.`
+    : "The game will start immediately when the next required human joins.";
 }
 
 function renderResults() {
@@ -405,12 +371,6 @@ function renderPhasePanel() {
       instruction: "Follow the current room prompt.",
     }),
   };
-
-  if (state.phase === "lobby" && state.phaseEndsAt) {
-    copy.kicker = "Get ready";
-    copy.title = "Game starts soon";
-    copy.instruction = "Two humans are in. The room will fill with AI participants automatically.";
-  }
 
   const tiedPlayers = state.players.filter((player) => state.tiebreakPlayerIds?.includes(player.id));
   const tiedNames = tiedPlayers.map((player) => player.name).join(", ");
@@ -949,7 +909,4 @@ setInterval(() => {
     timerFill.classList.toggle("urgent", isUrgent);
   }
 
-  if (state.phase === "lobby") {
-    renderLobbyCountdown();
-  }
 }, 1000);

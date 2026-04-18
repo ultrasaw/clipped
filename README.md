@@ -1,13 +1,33 @@
 # Clipped
 
-Prototype for a social deduction chat game where humans try to recognize each
-other inside a room of AI participants.
+https://clipper.chat
 
-## Run The Prototype
+Clipped is a browser-based social deduction prototype. Human players try to
+find each other inside a room filled with AI contestants that are trying to
+pass as human.
+
+## What It Does
+
+- Lists and creates game rooms
+- Starts a room immediately once the required number of humans join
+- Runs a server-owned game loop with timed and auto-advanced phases
+- Streams live room state to browsers with Server-Sent Events
+- Adds AI players that act through the same action pipeline as humans
+- Generates spark questions through the OpenAI Responses API
+
+Current default room settings:
+
+- 2 human players
+- 4 AI players
+- 3 rounds
+- 120 second chat phase
+
+## Local Development
 
 Requirements:
 
 - Node.js 20 or newer
+- `OPENAI_API_KEY`
 
 Start the server:
 
@@ -15,165 +35,29 @@ Start the server:
 npm start
 ```
 
-Then open:
+Open:
 
 ```text
 http://localhost:3000
 ```
 
-Open the page in two browser tabs and join with two different names. The game
-starts automatically after a short countdown once both humans have joined.
+Create a room or open the demo room, then join from two tabs or two devices.
+As soon as the required human count is reached, the game enters round 1.
 
-## Test On Your Local Network
+Optional environment variables:
 
-The server listens on all local network interfaces by default. When you run:
+- `OPENAI_MODEL` defaults to `gpt-4.1`
+- `PORT` defaults to `3000`
+- `HOST` defaults to `0.0.0.0`
+- `LOG_LEVEL` supports `debug`, `info`, `warn`, `error`
 
-```bash
-npm start
-```
-
-the terminal prints something like:
-
-```text
-Game prototype running locally at http://localhost:3000
-Local network URLs:
-  http://192.168.1.42:3000
-```
-
-Share the `http://192.168.x.x:3000` URL with teammates on the same Wi-Fi or LAN.
-
-If teammates cannot connect:
-
-- Make sure everyone is on the same network.
-- Make sure the server is still running on your machine.
-- Allow Node.js through Windows Firewall if prompted.
-- Try temporarily using a private/home network instead of a public network profile.
-- Check that port `3000` is not blocked by your network.
-
-You can also choose another port:
+Run tests:
 
 ```bash
-$env:PORT=3001; npm start
+npm test
 ```
 
-## Current Scope
-
-This slice is intentionally simple, but the server now owns the game loop:
-
-- Static browser client
-- Node HTTP server
-- Server-Sent Events for live state updates
-- In-memory demo room
-- Two human players
-- Four mock AI players
-- Server-owned phases
-- Generic action endpoint
-- Mock agents that act through the same controller path as humans
-- No database
-- No login
-- No LLM calls yet
-
-## Architecture
-
-The chat UI is only an interface. The game system lives on the server.
-
-```text
-Browser UI
-  -> POST /actions
-  -> server.js transport layer
-  -> src/game.js controller
-  -> src/agents.js mock agents
-  -> SSE public state broadcast
-```
-
-Important files:
-
-- `server.js`: HTTP server, static files, SSE, action routing
-- `src/gameConfig.js`: shared tuning values for player counts, phase durations, and text limits
-- `src/game.js`: room state, phases, validation, voting, win resolution
-- `src/agents.js`: mock AI players and scheduled agent actions
-- `src/agentContract.js`: compatibility contract for future agents
-- `src/agentContext.js`: safe public context builder for agents
-- `src/publicState.js`: safe state serialization for each viewer
-- `public/app.js`: browser rendering and action submission
-- `docs/AGENT_BLUEPRINT.md`: teammate-facing agent implementation guide
-- `docs/INTEGRATION_POINTS.md`: frontend, agent, infra, and game-manager integration contract
-
-## Supported Actions
-
-The client and agents both submit game actions:
-
-- `JOIN_ROOM`
-- `START_GAME`
-- `ADVANCE_PHASE`
-- `SUBMIT_SPARK`
-- `SEND_CHAT`
-- `SUBMIT_FINAL`
-- `CAST_VOTE`
-- `SUBMIT_TIEBREAK`
-- `CAST_TIEBREAK_VOTE`
-- `RESET_ROOM`
-
-The game controller validates every action before mutating room state.
-
-## Operational Endpoints
-
-These endpoints help with deployment and playtest debugging.
-
-### `GET /health`
-
-Opens a visual server status page in the browser. It can also return compact
-JSON status without hidden role information.
-
-JSON form:
-
-```text
-GET /health?format=json
-```
-
-Example:
-
-```json
-{
-  "ok": true,
-  "phase": "chat",
-  "round": 1,
-  "maxRounds": 3,
-  "players": 6,
-  "alivePlayers": 6,
-  "clients": 2,
-  "messages": 12,
-  "events": 24,
-  "uptimeSeconds": 123
-}
-```
-
-### `GET /debug/events`
-
-Opens a visual timeline of the current room's structured event log.
-
-This is intended for development and playtest debugging. It records accepted and
-rejected actions, phase changes, joins, ejections, game start, game over, and
-room resets.
-
-JSON form:
-
-```text
-GET /debug/events?format=json
-```
-
-Example:
-
-```json
-{
-  "roomId": "demo",
-  "phase": "spark",
-  "round": 1,
-  "events": []
-}
-```
-
-## Prototype Flow
+## Game Flow
 
 ```text
 lobby
@@ -182,54 +66,80 @@ lobby
 -> chat
 -> final_statements
 -> vote
--> tiebreak_statements, if vote is tied
--> tiebreak_vote, if vote is tied
+-> tiebreak_statements, if needed
+-> tiebreak_vote, if needed
 -> reveal
 -> next round or game_over
 ```
 
-Normal players do not need to advance phases manually. The server advances when
-all required submissions are in, and timed phases advance when their timer ends.
+The server advances phases automatically when all required submissions are in,
+or when a timed phase expires.
 
-To show debug controls such as `Advance` and `Reset`, open:
+Use dev controls during local debugging:
 
 ```text
 http://localhost:3000?dev=1
 ```
 
-Use this during development if a playtest gets stuck or you want to skip ahead.
-
-## Server Logs
-
-The server is intentionally verbose while prototyping. The terminal shows:
-
-- HTTP requests
-- SSE client connects/disconnects
-- Submitted actions
-- Accepted/rejected actions
-- Phase changes
-- Mock agent scheduling
-- Mock agent actions
-- State broadcasts
-- What the room is currently waiting for
-
-Example:
+## Architecture
 
 ```text
-[11:58:04] INFO  phase changed from=lobby to=spark round=1 waitingFor=spark answers from Alice, Ben, Mara, Jules, Theo, Nia
-[11:58:05] INFO  action accepted type=SUBMIT_SPARK actor=Mara/ai/alive before=phase=spark round=1 players=6 alive=6 humansAlive=2 after=phase=spark round=1 players=6 alive=6 humansAlive=2
-[11:58:06] INFO  waiting for=spark answers from Alice, Ben
+Browser UI
+  -> /api/rooms and /api/rooms/:roomId/*
+  -> server.js transport and room runtime
+  -> src/game.js game rules and state transitions
+  -> src/agents.js AI scheduling and actions
+  -> SSE state broadcast back to clients
 ```
 
-To reduce noise:
+Key files:
 
-```bash
-$env:LOG_LEVEL="info"; npm start
-```
+- `server.js`: HTTP routes, SSE, room lifecycle, health/debug pages
+- `src/game.js`: room state, joins, phase changes, votes, win resolution
+- `src/gameConfig.js`: room defaults, limits, and phase durations
+- `src/agents.js`: AI roster, timing, and action scheduling
+- `src/questions.js`: OpenAI-backed spark question generation
+- `src/publicState.js`: viewer-safe state serialization
+- `public/app.js`: room list, join flow, and in-browser game UI
 
-Available levels:
+## HTTP Surface
 
-- `debug`
-- `info`
-- `warn`
-- `error`
+Main browser and API routes:
+
+- `GET /`: rooms screen
+- `GET /rooms/:roomId`: room UI
+- `GET /api/rooms`: list rooms
+- `POST /api/rooms`: create room
+- `GET /api/rooms/:roomId/state`: fetch current public state
+- `GET /api/rooms/:roomId/events`: subscribe to room state updates
+- `POST /api/rooms/:roomId/actions`: submit player actions
+- `POST /api/rooms/:roomId/admin/reset`: reset a room
+- `GET /health`: server status page or JSON with `?format=json`
+- `GET /debug/events`: debug event page
+- `GET /api/rooms/:roomId/debug/events`: per-room event log
+
+Supported actions:
+
+- `JOIN_ROOM`
+- `START_GAME`
+- `ADVANCE_PHASE`
+- `SUBMIT_SPARK`
+- `SEND_CHAT`
+- `SET_TYPING`
+- `SUBMIT_FINAL`
+- `CAST_VOTE`
+- `SUBMIT_TIEBREAK`
+- `CAST_TIEBREAK_VOTE`
+- `RESET_ROOM`
+
+## Deployment
+
+The repo includes Kubernetes manifests under [`k8s/`](./k8s) and supporting
+infrastructure under [`cloud_infrastructure/`](./cloud_infrastructure).
+
+For deployment details, use:
+
+- [`k8s/README.md`](/Users/doom/Documents/_projects/clipped/k8s/README.md:1)
+
+The repo also includes a GitHub Actions deploy workflow that builds and deploys
+on pushes to `main`.
