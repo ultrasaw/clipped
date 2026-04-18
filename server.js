@@ -90,10 +90,11 @@ function broadcastState(runtime) {
   });
 }
 
-function applyAndBroadcast(runtime, action, context = {}) {
+async function applyAndBroadcast(runtime, action, context = {}) {
   const { room } = runtime;
   const previousPhase = room.phase;
   const before = summarizeRoom(room);
+  const previousEventCount = room.events.length;
 
   logger.info("action received", {
     source: context.source || "client",
@@ -104,7 +105,7 @@ function applyAndBroadcast(runtime, action, context = {}) {
     round: room.round,
   });
 
-  const result = applyAction(room, action, context);
+  const result = await applyAction(room, action, context);
 
   if (!result.ok) {
     room.errors.push(result.error);
@@ -151,6 +152,8 @@ function applyAndBroadcast(runtime, action, context = {}) {
     maybeScheduleAutoAdvance(runtime);
   }
 
+  logNewEvents(room, previousEventCount);
+
   return result;
 }
 
@@ -170,6 +173,19 @@ function handlePhaseChanged(runtime, previousPhase) {
   schedulePhaseTimer(runtime);
   maybeScheduleAutoAdvance(runtime);
   broadcastState(runtime);
+}
+
+function logNewEvents(room, previousEventCount) {
+  const newEvents = room.events.slice(previousEventCount);
+
+  for (const event of newEvents) {
+    logger.info("room event", {
+      type: event.type,
+      phase: event.phase,
+      round: event.round,
+      details: event,
+    });
+  }
 }
 
 function schedulePhaseTimer(runtime) {
@@ -192,7 +208,9 @@ function schedulePhaseTimer(runtime) {
   runtime.phaseTimer = setTimeout(() => {
     runtime.phaseTimer = null;
     logger.info("phase timer elapsed", { room: room.id, phase: room.phase, waitingFor: describeWaitingFor(room) });
-    applyAndBroadcast(runtime, { type: "ADVANCE_PHASE" }, { source: "timer" });
+    applyAndBroadcast(runtime, { type: "ADVANCE_PHASE" }, { source: "timer" }).catch((error) => {
+      logger.error("phase timer advance failed", { error: error.message || String(error) });
+    });
   }, delayMs);
 }
 
@@ -220,7 +238,9 @@ function maybeScheduleAutoAdvance(runtime) {
   runtime.autoAdvanceTimer = setTimeout(() => {
     runtime.autoAdvanceTimer = null;
     logger.info("auto advance triggered", { room: room.id, phase: room.phase });
-    applyAndBroadcast(runtime, { type: "ADVANCE_PHASE" }, { source: "auto" });
+    applyAndBroadcast(runtime, { type: "ADVANCE_PHASE" }, { source: "auto" }).catch((error) => {
+      logger.error("auto advance failed", { error: error.message || String(error) });
+    });
   }, 700);
 }
 
@@ -270,7 +290,7 @@ async function handlePostAction(req, res, runtime) {
     const body = JSON.parse(rawBody || "{}");
     const playerId = typeof body.playerId === "string" ? body.playerId : null;
     const action = normalizeAction(body.action || {}, playerId);
-    const result = applyAndBroadcast(runtime, action, { connectionId: playerId || null });
+    const result = await applyAndBroadcast(runtime, action, { connectionId: playerId || null });
 
     logger.debug("action response sent", {
       type: action.type,
@@ -389,7 +409,9 @@ function maybeScheduleLobbyStart(runtime, action) {
     }
 
     logger.info("lobby auto-start triggered");
-    applyAndBroadcast(runtime, { type: "START_GAME" }, { source: "auto" });
+    applyAndBroadcast(runtime, { type: "START_GAME" }, { source: "auto" }).catch((error) => {
+      logger.error("lobby auto-start failed", { error: error.message || String(error) });
+    });
   }, delayMs);
 }
 
@@ -650,8 +672,9 @@ const server = http.createServer((req, res) => {
     const runtime = getRuntimeOr404(res, resetRoomId);
 
     if (runtime) {
-      const result = applyAndBroadcast(runtime, { type: "RESET_ROOM" }, { source: "admin" });
-      sendJson(res, result.ok ? 200 : 400, result);
+      applyAndBroadcast(runtime, { type: "RESET_ROOM" }, { source: "admin" })
+        .then((result) => sendJson(res, result.ok ? 200 : 400, result))
+        .catch((error) => sendJson(res, 500, { ok: false, error: error.message || "Reset failed." }));
     }
 
     return;
