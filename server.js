@@ -1,11 +1,13 @@
 const http = require("node:http");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { createDemoRoom, applyAction } = require("./src/game");
 const { createMockAgentManager } = require("./src/agents");
 const { getPublicState } = require("./src/publicState");
 
+const HOST = process.env.HOST || "0.0.0.0";
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, "public");
 
@@ -213,6 +215,30 @@ const server = http.createServer((req, res) => {
   sendJson(res, 405, { ok: false, error: "Method not allowed." });
 });
 
-server.listen(PORT, () => {
-  console.log(`Game prototype running at http://localhost:${PORT}`);
+function getLocalNetworkUrls(port) {
+  const interfaces = os.networkInterfaces();
+  const urls = [];
+
+  for (const addresses of Object.values(interfaces)) {
+    for (const address of addresses || []) {
+      if (address.family === "IPv4" && !address.internal) {
+        urls.push(`http://${address.address}:${port}`);
+      }
+    }
+  }
+
+  return urls;
+}
+
+server.listen(PORT, HOST, () => {
+  console.log(`Game prototype running locally at http://localhost:${PORT}`);
+
+  const networkUrls = getLocalNetworkUrls(PORT);
+
+  if (networkUrls.length) {
+    console.log("Local network URLs:");
+    networkUrls.forEach((url) => console.log(`  ${url}`));
+  } else {
+    console.log("No local network IP detected. Check your Wi-Fi/Ethernet connection.");
+  }
 });

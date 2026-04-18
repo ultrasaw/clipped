@@ -24,6 +24,38 @@ http://localhost:3000
 Open the page in two browser tabs, join with two different names, then start the
 demo game.
 
+## Test On Your Local Network
+
+The server listens on all local network interfaces by default. When you run:
+
+```bash
+npm start
+```
+
+the terminal prints something like:
+
+```text
+Game prototype running locally at http://localhost:3000
+Local network URLs:
+  http://192.168.1.42:3000
+```
+
+Share the `http://192.168.x.x:3000` URL with teammates on the same Wi-Fi or LAN.
+
+If teammates cannot connect:
+
+- Make sure everyone is on the same network.
+- Make sure the server is still running on your machine.
+- Allow Node.js through Windows Firewall if prompted.
+- Try temporarily using a private/home network instead of a public network profile.
+- Check that port `3000` is not blocked by your network.
+
+You can also choose another port:
+
+```bash
+$env:PORT=3001; npm start
+```
+
 ## Current Scope
 
 This slice is intentionally simple, but the server now owns the game loop:
