@@ -1,3 +1,5 @@
+const logger = require("./logger");
+
 const OPENAI_API_URL = "https://api.openai.com/v1/responses";
 const DEFAULT_MODEL = process.env.OPENAI_MODEL || "gpt-4.1";
 
@@ -28,10 +30,57 @@ function extractOutputText(payload) {
     .join(" ");
 }
 
+function describeGeneration(details) {
+  const agent = details.agent || "system";
+  const roundLabel = typeof details.round === "number" ? `round ${details.round} ` : "";
+
+  if (details.action === "generate answer to spark question") {
+    return `generate answer to ${roundLabel}spark question for ${agent}`;
+  }
+
+  if (details.action === "generate chat message") {
+    return `generate chat message for ${agent}`;
+  }
+
+  if (details.action === "generate final statement") {
+    return `generate final statement for ${agent}`;
+  }
+
+  if (details.action === "generate tiebreak statement") {
+    return `generate tiebreak statement for ${agent}`;
+  }
+
+  if (details.action === "choose vote target") {
+    return `choose vote target for ${agent}`;
+  }
+
+  if (details.action === "choose tiebreak vote target") {
+    return `choose tiebreak vote target for ${agent}`;
+  }
+
+  if (details.action === "generate spark question") {
+    return "generate spark question";
+  }
+
+  return `${details.action || "generate text"} for ${agent}`;
+}
+
 async function generateText(prompt) {
+  let details = {};
+
+  if (arguments.length > 1 && typeof arguments[1] === "object" && arguments[1] !== null) {
+    details = arguments[1];
+  }
+
   if (!process.env.OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is required to generate text.");
   }
+
+  logger.info(describeGeneration(details), {
+    phase: details.phase,
+    round: details.round,
+    prompt: details.prompt,
+  });
 
   const response = await fetch(OPENAI_API_URL, {
     method: "POST",
@@ -47,11 +96,23 @@ async function generateText(prompt) {
 
   if (!response.ok) {
     const errorText = await response.text();
+    logger.error(`openai request failed for ${details.agent || "system"}`, {
+      action: details.action || "generate text",
+      status: response.status,
+      error: errorText,
+    });
     throw new Error(`OpenAI request failed with ${response.status}: ${errorText}`);
   }
 
   const payload = await response.json();
-  return extractOutputText(payload);
+  const outputText = extractOutputText(payload);
+
+  logger.info(`response from ${details.agent || "system"}`, {
+    action: details.action || "generate text",
+    response: outputText,
+  });
+
+  return outputText;
 }
 
 function buildIdentityBlock(name, personality, gameplayPrompt = "") {
@@ -90,7 +151,11 @@ async function createQuestion() {
           },
         ],
       },
-    ]),
+    ], {
+      action: "generate spark question",
+      agent: "system",
+      prompt: "Create one new spark prompt for the next round.",
+    }),
   );
 
   if (!question) {
@@ -100,7 +165,7 @@ async function createQuestion() {
   return question;
 }
 
-async function answerQuestion(name, personality, question, gameplayPrompt = "") {
+async function answerQuestion(name, personality, question, gameplayPrompt = "", options = {}) {
   const answer = normalizeQuestion(
     await generateText([
       {
@@ -131,7 +196,13 @@ async function answerQuestion(name, personality, question, gameplayPrompt = "") 
           },
         ],
       },
-    ]),
+    ], {
+      action: "generate answer to spark question",
+      agent: name,
+      phase: options.phase,
+      round: options.round,
+      prompt: question,
+    }),
   );
 
   if (!answer) {
@@ -232,7 +303,13 @@ async function createChatMessage(name, personality, gameplayPrompt, context) {
           },
         ],
       },
-    ]),
+    ], {
+      action: "generate chat message",
+      agent: name,
+      phase: context?.game?.phase,
+      round: context?.game?.round,
+      prompt: summarizeContext(context),
+    }),
   );
 
   if (!message) {
@@ -272,7 +349,13 @@ async function createFinalStatement(name, personality, gameplayPrompt, context) 
           },
         ],
       },
-    ]),
+    ], {
+      action: "generate final statement",
+      agent: name,
+      phase: context?.game?.phase,
+      round: context?.game?.round,
+      prompt: summarizeContext(context),
+    }),
   );
 
   if (!statement) {
@@ -312,7 +395,13 @@ async function createTiebreakStatement(name, personality, gameplayPrompt, contex
           },
         ],
       },
-    ]),
+    ], {
+      action: "generate tiebreak statement",
+      agent: name,
+      phase: context?.game?.phase,
+      round: context?.game?.round,
+      prompt: summarizeContext(context),
+    }),
   );
 
   if (!statement) {
@@ -357,7 +446,13 @@ async function chooseVoteTarget(name, personality, gameplayPrompt, context) {
           },
         ],
       },
-    ]),
+    ], {
+      action: context?.game?.phase === "tiebreak_vote" ? "choose tiebreak vote target" : "choose vote target",
+      agent: name,
+      phase: context?.game?.phase,
+      round: context?.game?.round,
+      prompt: summarizeContext(context),
+    }),
   );
 
   const directMatch = legalTargets.find((target) => target.id === rawTarget);

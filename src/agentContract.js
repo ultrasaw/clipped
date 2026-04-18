@@ -61,6 +61,10 @@ class BaseAgent {
       this.personalityPrompt,
       context.game.sparkPrompt,
       this.gameplayPrompt,
+      {
+        phase: context.game.phase,
+        round: context.game.round,
+      },
     );
 
     return createSparkAction(this.id, text);

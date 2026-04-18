@@ -80,6 +80,7 @@ const agentManager = createMockAgentManager({
 function applyAndBroadcast(action, context = {}) {
   const previousPhase = room.phase;
   const before = summarizeRoom(room);
+  const previousEventCount = room.events.length;
 
   logger.info("action received", {
     source: context.source || "client",
@@ -137,6 +138,8 @@ function applyAndBroadcast(action, context = {}) {
     maybeScheduleAutoAdvance();
   }
 
+  logNewEvents(previousEventCount);
+
   return result;
 }
 
@@ -153,6 +156,19 @@ function handlePhaseChanged(previousPhase) {
   schedulePhaseTimer();
   maybeScheduleAutoAdvance();
   broadcastState();
+}
+
+function logNewEvents(previousEventCount) {
+  const newEvents = room.events.slice(previousEventCount);
+
+  for (const event of newEvents) {
+    logger.info("room event", {
+      type: event.type,
+      phase: event.phase,
+      round: event.round,
+      details: event,
+    });
+  }
 }
 
 function schedulePhaseTimer() {

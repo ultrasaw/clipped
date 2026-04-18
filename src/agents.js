@@ -1,65 +1,63 @@
-const AI_NAMES = ["Mara", "Jules", "Theo", "Nia"];
+const { BaseAgent } = require("./agentContract");
+const { buildAgentContext } = require("./agentContext");
 
-const SPARK_ANSWERS = [
-  "cold pizza",
-  "rain smell",
-  "too quiet",
-  "tiny spoons",
-  "night",
-  "overthinking",
-  "bad coffee",
-  "long walks",
+const AI_ROSTER = [
+  {
+    name: "Mara",
+    personalityPrompt: "Warm, observant, and lightly skeptical. Speaks casually and notices social tone.",
+  },
+  {
+    name: "Jules",
+    personalityPrompt: "Guarded, dry, and pattern-focused. Short replies, a little suspicious of everyone.",
+  },
+  {
+    name: "Theo",
+    personalityPrompt: "Playful, confident, and socially agile. Likes teasing reads without sounding robotic.",
+  },
+  {
+    name: "Nia",
+    personalityPrompt: "Calm, sharp, and understated. Tends to sound thoughtful rather than loud.",
+  },
 ];
 
-const CHAT_TEMPLATES = [
-  "{target}, that felt a little too neat.",
-  "I do not buy the confidence from {target}.",
-  "{target}'s answer is normal, but maybe too normal.",
-  "I keep rereading {target}. Something is off.",
-  "Could be nothing, but {target} dodged the actual vibe.",
-  "I trust {target} less after that.",
-  "This room is making everyone sound rehearsed.",
-  "I am more suspicious of the people trying very hard to be casual.",
-];
+const DEFAULT_GAMEPLAY_PROMPT =
+  "You are an AI contestant trying to pass as human, avoid suspicion, and identify who feels least human.";
 
-const FINAL_TEMPLATES = [
-  "My final read is {target}. Too controlled.",
-  "I am voting {target}. The pattern feels careful.",
-  "{target} still feels like the safest fake to me.",
-  "If I am wrong, fine, but {target} is my best read.",
-];
-
-function createAiPlayers(startIndex = 0, count = AI_NAMES.length) {
-  return AI_NAMES.slice(0, count).map((name, index) => ({
+function createAiPlayers(startIndex = 0, count = AI_ROSTER.length) {
+  return AI_ROSTER.slice(0, count).map((profile, index) => ({
     id: `ai_${index + startIndex + 1}`,
-    name,
+    name: profile.name,
     role: "ai",
     status: "alive",
     connectionId: null,
   }));
 }
 
-function livingTargets(room, agentId) {
-  return room.players.filter((player) => player.status === "alive" && player.id !== agentId);
-}
+function createRuntimeAgent(player) {
+  const profile = AI_ROSTER.find((entry) => entry.name === player.name);
 
-function pick(list) {
-  return list[Math.floor(Math.random() * list.length)];
-}
-
-function fillTemplate(template, target) {
-  return template.replaceAll("{target}", target.name);
+  return new BaseAgent({
+    player,
+    gameplayPrompt: DEFAULT_GAMEPLAY_PROMPT,
+    personalityPrompt: profile?.personalityPrompt || "Natural, human-sounding, and a bit suspicious.",
+  });
 }
 
 function createMockAgentManager({ applyAction, broadcastState, logger, submitAction }) {
   const timeouts = new Set();
+  const runtimeAgents = new Map();
 
   function schedule(label, callback, delayMs) {
     logger?.debug("agent scheduled", { label, inMs: delayMs });
 
     const timeout = setTimeout(() => {
       timeouts.delete(timeout);
-      callback();
+      Promise.resolve(callback()).catch((error) => {
+        logger?.error("agent callback failed", {
+          label,
+          error: error.message || String(error),
+        });
+      });
     }, delayMs);
 
     timeouts.add(timeout);
@@ -75,6 +73,19 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
     }
 
     timeouts.clear();
+  }
+
+  function getRuntimeAgent(player) {
+    const existing = runtimeAgents.get(player.id);
+
+    if (existing) {
+      existing.player = player;
+      return existing;
+    }
+
+    const agent = createRuntimeAgent(player);
+    runtimeAgents.set(player.id, agent);
+    return agent;
   }
 
   function submitAiAction(room, action) {
@@ -102,6 +113,47 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
     broadcastState();
   }
 
+  async function runAgentMethod(room, player, methodName) {
+    const agent = getRuntimeAgent(player);
+    const context = buildAgentContext(room, player);
+
+    agent.onPhaseStarted(context);
+    logger?.info("agent thinking", {
+      agent: agent.name,
+      method: methodName,
+      phase: room.phase,
+      round: room.round,
+    });
+
+    const actionOrActions = await agent[methodName](context);
+
+    if (!actionOrActions) {
+      logger?.debug("agent produced no action", {
+        agent: agent.name,
+        method: methodName,
+        phase: room.phase,
+      });
+      return;
+    }
+
+    const actions = Array.isArray(actionOrActions) ? actionOrActions : [actionOrActions];
+
+    for (const action of actions) {
+      if (!action) {
+        continue;
+      }
+
+      logger?.info("agent produced action", {
+        agent: agent.name,
+        method: methodName,
+        type: action.type,
+        text: action.text,
+        targetId: action.targetId,
+      });
+      submitAiAction(room, action);
+    }
+  }
+
   function handlePhaseEntered(room) {
     cancelAll();
 
@@ -110,51 +162,23 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
 
     if (room.phase === "spark") {
       agents.forEach((agent, index) => {
-        schedule(`${agent.name} spark answer`, () => {
-          submitAiAction(room, {
-            type: "SUBMIT_SPARK",
-            playerId: agent.id,
-            text: pick(SPARK_ANSWERS),
-          });
-        }, 500 + index * 350);
+        schedule(`${agent.name} spark answer`, () => runAgentMethod(room, agent, "getSparkAction"), 500 + index * 350);
       });
     }
 
     if (room.phase === "chat") {
       agents.forEach((agent, index) => {
-        schedule(`${agent.name} chat message`, () => {
-          const target = pick(livingTargets(room, agent.id));
-
-          if (!target) {
-            logger?.warn("agent has no chat target", { agent: agent.name });
-            return;
-          }
-
-          submitAiAction(room, {
-            type: "SEND_CHAT",
-            playerId: agent.id,
-            text: fillTemplate(pick(CHAT_TEMPLATES), target),
-          });
-        }, 1_200 + index * 1_500);
+        schedule(`${agent.name} chat message`, () => runAgentMethod(room, agent, "getChatActions"), 1_200 + index * 1_500);
       });
     }
 
     if (room.phase === "final_statements") {
       agents.forEach((agent, index) => {
-        schedule(`${agent.name} final statement`, () => {
-          const target = pick(livingTargets(room, agent.id));
-
-          if (!target) {
-            logger?.warn("agent has no final target", { agent: agent.name });
-            return;
-          }
-
-          submitAiAction(room, {
-            type: "SUBMIT_FINAL",
-            playerId: agent.id,
-            text: fillTemplate(pick(FINAL_TEMPLATES), target),
-          });
-        }, 500 + index * 400);
+        schedule(
+          `${agent.name} final statement`,
+          () => runAgentMethod(room, agent, "getFinalStatementAction"),
+          500 + index * 400,
+        );
       });
     }
 
@@ -162,36 +186,17 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
       const tiedAgents = agents.filter((agent) => room.tiebreakPlayerIds.includes(agent.id));
 
       tiedAgents.forEach((agent, index) => {
-        schedule(`${agent.name} tiebreak statement`, () => {
-          const target = pick(livingTargets(room, agent.id));
-
-          submitAiAction(room, {
-            type: "SUBMIT_TIEBREAK",
-            playerId: agent.id,
-            text: target
-              ? fillTemplate(pick(FINAL_TEMPLATES), target)
-              : "I still think this read is too convenient.",
-          });
-        }, 500 + index * 400);
+        schedule(
+          `${agent.name} tiebreak statement`,
+          () => runAgentMethod(room, agent, "getTiebreakStatementAction"),
+          500 + index * 400,
+        );
       });
     }
 
     if (room.phase === "vote") {
       agents.forEach((agent, index) => {
-        schedule(`${agent.name} vote`, () => {
-          const target = pick(livingTargets(room, agent.id));
-
-          if (!target) {
-            logger?.warn("agent has no vote target", { agent: agent.name });
-            return;
-          }
-
-          submitAiAction(room, {
-            type: "CAST_VOTE",
-            voterId: agent.id,
-            targetId: target.id,
-          });
-        }, 650 + index * 450);
+        schedule(`${agent.name} vote`, () => runAgentMethod(room, agent, "getVoteAction"), 650 + index * 450);
       });
     }
 
@@ -199,25 +204,11 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
       const votingAgents = agents.filter((agent) => !room.tiebreakPlayerIds.includes(agent.id));
 
       votingAgents.forEach((agent, index) => {
-        schedule(`${agent.name} tiebreak vote`, () => {
-          const target = pick(
-            room.tiebreakPlayerIds
-              .map((playerId) => room.players.find((player) => player.id === playerId))
-              .filter(Boolean)
-              .filter((player) => player.status === "alive"),
-          );
-
-          if (!target) {
-            logger?.warn("agent has no tiebreak vote target", { agent: agent.name });
-            return;
-          }
-
-          submitAiAction(room, {
-            type: "CAST_TIEBREAK_VOTE",
-            voterId: agent.id,
-            targetId: target.id,
-          });
-        }, 650 + index * 450);
+        schedule(
+          `${agent.name} tiebreak vote`,
+          () => runAgentMethod(room, agent, "getTiebreakVoteAction"),
+          650 + index * 450,
+        );
       });
     }
   }
