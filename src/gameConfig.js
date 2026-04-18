@@ -2,7 +2,6 @@ const GAME_CONFIG = {
   players: {
     humansRequired: 2,
     aiCount: 4,
-    lobbyAutoStartDelay: 10_000,
   },
   rounds: {
     maxRounds: 3,
