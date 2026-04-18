@@ -1,9 +1,18 @@
 const { BaseAgent } = require("./agentContract");
-const { buildAgentContext } = require("./agentContext");
+const { buildAgentContext, hasBothHumansRespondedThisPhase } = require("./agentContext");
+
+const WAIT_FOR_BOTH_CURRENT_PHASE = "wait_for_both_current_phase";
+const USE_PRIOR_SIGNALS_NOW = "use_prior_signals_now";
 
 const AI_ROSTER = [
   {
     name: "Mara",
+    timingProfile: WAIT_FOR_BOTH_CURRENT_PHASE,
+    mimicStrategyPrompt: [
+      "Blend both humans' cadence and social texture into a warm, natural reply.",
+      "Use both voices together as inspiration, but do not echo either one directly.",
+      "Sound like you belong in the room, not like you're quoting someone.",
+    ].join(" "),
     personalityPrompt: [
       "You are Mara.",
       "Your social energy is warm and engaged, and your confidence is steady without sounding forceful.",
@@ -18,6 +27,12 @@ const AI_ROSTER = [
   },
   {
     name: "Jules",
+    timingProfile: USE_PRIOR_SIGNALS_NOW,
+    mimicStrategyPrompt: [
+      "Use prior human signals as context, then answer from a terser, more contrarian angle.",
+      "Do not mirror either human too closely.",
+      "Let the reply feel grounded in the room while still being noticeably your own take.",
+    ].join(" "),
     personalityPrompt: [
       "You are Jules.",
       "Your social energy is low-key and guarded, and your confidence shows up as bluntness.",
@@ -32,6 +47,12 @@ const AI_ROSTER = [
   },
   {
     name: "Theo",
+    timingProfile: USE_PRIOR_SIGNALS_NOW,
+    mimicStrategyPrompt: [
+      "Use prior human signals, then pivot playfully into something unexpectedly angled or oddly specific.",
+      "You can sound noticeably different from the humans, but the reply still needs to fit the prompt and feel plausible.",
+      "Aim for socially agile contrast, not randomness.",
+    ].join(" "),
     personalityPrompt: [
       "You are Theo.",
       "Your social energy is lively and confident, and you move easily through the room.",
@@ -46,6 +67,12 @@ const AI_ROSTER = [
   },
   {
     name: "Nia",
+    timingProfile: WAIT_FOR_BOTH_CURRENT_PHASE,
+    mimicStrategyPrompt: [
+      "Wait for both current human replies, then remix them into a measured, analytical response.",
+      "Pull in what feels useful from each human without mirroring their wording.",
+      "You should sound composed and observant, not copied.",
+    ].join(" "),
     personalityPrompt: [
       "You are Nia.",
       "Your social energy is calm and restrained, and your confidence is quiet but clear.",
@@ -140,6 +167,14 @@ function createRuntimeAgent(player) {
   return new BaseAgent({
     player,
     gameplayPrompt: DEFAULT_GAMEPLAY_PROMPT,
+    timingProfile: profile?.timingProfile || USE_PRIOR_SIGNALS_NOW,
+    mimicStrategyPrompt:
+      profile?.mimicStrategyPrompt ||
+      [
+        "Use both humans as reference points instead of copying one.",
+        "Stay recognizably yourself even when you blend in.",
+        "A different angle is good; obvious copying is not.",
+      ].join(" "),
     personalityPrompt:
       profile?.personalityPrompt ||
       [
@@ -151,15 +186,113 @@ function createRuntimeAgent(player) {
   });
 }
 
-function createMockAgentManager({ applyAction, broadcastState, logger, submitAction }) {
+function getPhaseKey(room) {
+  return `${room.phase}:${room.round}:${room.phaseStartedAt || 0}`;
+}
+
+function getActionMethodName(room) {
+  if (room.phase === "spark") {
+    return "getSparkAction";
+  }
+
+  if (room.phase === "chat") {
+    return "getChatActions";
+  }
+
+  if (room.phase === "final_statements") {
+    return "getFinalStatementAction";
+  }
+
+  if (room.phase === "tiebreak_statements") {
+    return "getTiebreakStatementAction";
+  }
+
+  if (room.phase === "vote") {
+    return "getVoteAction";
+  }
+
+  if (room.phase === "tiebreak_vote") {
+    return "getTiebreakVoteAction";
+  }
+
+  return null;
+}
+
+function getInitialDelayMs(phase, index) {
+  if (phase === "chat") {
+    return 1_200 + index * 1_500;
+  }
+
+  if (phase === "final_statements" || phase === "tiebreak_statements") {
+    return 500 + index * 400;
+  }
+
+  if (phase === "vote" || phase === "tiebreak_vote") {
+    return 650 + index * 450;
+  }
+
+  return 300 + index * 250;
+}
+
+function getReleaseDelayMs(phase, index) {
+  if (phase === "spark") {
+    return 300 + index * 300;
+  }
+
+  if (phase === "chat") {
+    return 250 + index * 300;
+  }
+
+  if (phase === "final_statements") {
+    return 200 + index * 220;
+  }
+
+  return 200 + index * 200;
+}
+
+function getFallbackDelayMs(room) {
+  const phaseStartedAt = Number(room.phaseStartedAt || 0);
+  const phaseEndsAt = Number(room.phaseEndsAt || 0);
+  const durationMs = Math.max(phaseEndsAt - phaseStartedAt, 0);
+
+  if (!phaseStartedAt || !phaseEndsAt || durationMs <= 0) {
+    return null;
+  }
+
+  const reserveMs = Math.min(Math.round(durationMs * 0.2), 8_000);
+  return Math.max(durationMs - reserveMs, 0);
+}
+
+function createPhaseState(room) {
+  return {
+    key: getPhaseKey(room),
+    phase: room.phase,
+    round: room.round,
+    acted: new Set(),
+    scheduled: new Set(),
+    pending: new Map(),
+    fallbackTimer: null,
+  };
+}
+
+function createMockAgentManager({
+  applyAction,
+  broadcastState,
+  logger,
+  submitAction,
+  agentFactory = createRuntimeAgent,
+  setTimeoutFn = setTimeout,
+  clearTimeoutFn = clearTimeout,
+}) {
   const timeouts = new Set();
   const runtimeAgents = new Map();
+  let phaseState = null;
   const pendingChatAgentIds = new Set();
 
   function schedule(label, callback, delayMs) {
     logger?.debug("agent scheduled", { label, inMs: delayMs });
 
-    const timeout = setTimeout(() => {
+    const timeout = setTimeoutFn(() => {
       timeouts.delete(timeout);
       Promise.resolve(callback()).catch((error) => {
         logger?.error("agent callback failed", {
@@ -167,9 +300,19 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
           error: error.message || String(error),
         });
       });
-    }, delayMs);
+    }, Math.max(0, delayMs));
 
     timeouts.add(timeout);
+    return timeout;
+  }
+
+  function clearTrackedTimeout(timeout) {
+    if (!timeout) {
+      return;
+    }
+
+    clearTimeoutFn(timeout);
+    timeouts.delete(timeout);
   }
 
   function cancelAll() {
@@ -178,11 +321,16 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
     }
 
     for (const timeout of timeouts) {
-      clearTimeout(timeout);
+      clearTimeoutFn(timeout);
     }
 
     timeouts.clear();
+
+    if (phaseState?.fallbackTimer) {
+      clearTrackedTimeout(phaseState.fallbackTimer);
+    }
     pendingChatAgentIds.clear();
+    phaseState = null;
   }
 
   function getRuntimeAgent(player) {
@@ -193,7 +341,7 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
       return existing;
     }
 
-    const agent = createRuntimeAgent(player);
+    const agent = agentFactory(player);
     runtimeAgents.set(player.id, agent);
     return agent;
   }
@@ -235,7 +383,6 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
     const agent = getRuntimeAgent(player);
     const context = buildAgentContext(room, player, options);
 
-    agent.onPhaseStarted(context);
     logger?.info("agent thinking", {
       agent: agent.name,
       method: methodName,
@@ -274,11 +421,42 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
     return actions;
   }
 
+  function isAgentCommitted(playerId) {
+    return Boolean(
+      phaseState &&
+        (phaseState.acted.has(playerId) || phaseState.scheduled.has(playerId) || pendingChatAgentIds.has(playerId)),
+    );
+  }
+
+  function markAgentCompleted(room, playerId) {
+    if (!phaseState || !isCurrentPhaseState(room)) {
+      return;
+    }
+
+    phaseState.scheduled.delete(playerId);
+    phaseState.acted.add(playerId);
+  }
+
+  function clearAgentScheduled(playerId) {
+    if (!phaseState) {
+      return;
+    }
+
+    phaseState.scheduled.delete(playerId);
+  }
+
   function scheduleTimedTextAction(room, player, delayMs, options) {
     const { methodName, expectedType, phase, timingLabel } = options;
 
+    if (!phaseState || !isCurrentPhaseState(room) || isAgentCommitted(player.id)) {
+      return;
+    }
+
+    phaseState.scheduled.add(player.id);
+
     schedule(`${player.name} prepare ${timingLabel}`, async () => {
       if (room.phase !== phase) {
+        clearAgentScheduled(player.id);
         return;
       }
 
@@ -286,6 +464,7 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
       const textAction = actions.find((action) => action.type === expectedType && action.text);
 
       if (!textAction) {
+        clearAgentScheduled(player.id);
         return;
       }
 
@@ -313,6 +492,7 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
 
       schedule(`${player.name} ${timingLabel}`, async () => {
         if (room.phase !== phase) {
+          clearAgentScheduled(player.id);
           return;
         }
 
@@ -327,12 +507,18 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
           await submitAiAction(room, textAction);
         } finally {
           await setAgentTyping(room, player, false);
+          markAgentCompleted(room, player.id);
         }
       }, sendDelayMs);
     }, delayMs);
   }
 
   function scheduleChatResponse(room, player, delayMs) {
+    if (!phaseState || !isCurrentPhaseState(room) || isAgentCommitted(player.id)) {
+      return;
+    }
+
+    phaseState.scheduled.add(player.id);
     pendingChatAgentIds.add(player.id);
     const recentChatMessages = room.messages
       .filter((message) => message.kind === "chat")
@@ -349,6 +535,8 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
     schedule(`${player.name} prepare chat response`, async () => {
       try {
         if (room.phase !== "chat") {
+          pendingChatAgentIds.delete(player.id);
+          clearAgentScheduled(player.id);
           return;
         }
 
@@ -356,6 +544,8 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
         const chatAction = actions.find((action) => action.type === "SEND_CHAT" && action.text);
 
         if (!chatAction) {
+          pendingChatAgentIds.delete(player.id);
+          clearAgentScheduled(player.id);
           return;
         }
 
@@ -383,6 +573,7 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
         schedule(`${player.name} chat response`, async () => {
           try {
             if (room.phase !== "chat") {
+              clearAgentScheduled(player.id);
               return;
             }
 
@@ -397,10 +588,12 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
             await setAgentTyping(room, player, false);
           } finally {
             pendingChatAgentIds.delete(player.id);
+            markAgentCompleted(room, player.id);
           }
         }, sendDelayMs);
       } catch (error) {
         pendingChatAgentIds.delete(player.id);
+        clearAgentScheduled(player.id);
         throw error;
       }
     }, delayMs);
@@ -414,7 +607,13 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
     const agents = room.players.filter((player) => player.role === "ai" && player.status === "alive");
 
     for (const agent of agents) {
-      if (agent.id === message.playerId || pendingChatAgentIds.has(agent.id)) {
+      const runtimeAgent = getRuntimeAgent(agent);
+
+      if (
+        agent.id === message.playerId ||
+        isAgentCommitted(agent.id) ||
+        (shouldWaitForBothHumans(room, runtimeAgent) && !shouldReleasePendingNow(room))
+      ) {
         continue;
       }
 
@@ -428,45 +627,216 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
     }
   }
 
-  function handlePhaseEntered(room) {
-    cancelAll();
+  function isWaitingPhase(phase) {
+    return phase === "spark" || phase === "chat" || phase === "final_statements";
+  }
 
-    const agents = room.players.filter((player) => player.role === "ai" && player.status === "alive");
-    logger?.info("agent manager handling phase", { phase: room.phase, agents: agents.length });
-
+  function shouldWaitForBothHumans(room, agent) {
     if (room.phase === "spark") {
-      const shuffledAgents = [...agents].sort(() => Math.random() - 0.5);
-
-      shuffledAgents.forEach((agent, index) => {
-        schedule(
-          `${agent.name} spark answer`,
-          () => runAgentMethod(room, agent, "getSparkAction"),
-          pickSparkAnswerDelay(room, index, shuffledAgents.length),
-        );
-      });
+      return true;
     }
 
-    if (room.phase === "chat") {
-      const visibleTypers = pickRandomSubset(agents, 1, Math.min(3, agents.length));
-
-      visibleTypers.forEach((agent, index) => {
-        scheduleChatResponse(room, agent, randomInt(200, 900) + index * 180);
-      });
+    if (room.phase === "chat" || room.phase === "final_statements") {
+      return agent.timingProfile === WAIT_FOR_BOTH_CURRENT_PHASE;
     }
 
-    if (room.phase === "final_statements") {
-      agents.forEach((agent, index) => {
-        scheduleTimedTextAction(room, agent, 500 + index * 400, {
+    return false;
+  }
+
+  function isCurrentPhaseState(room) {
+    return Boolean(phaseState && phaseState.key === getPhaseKey(room));
+  }
+
+  function scheduleFallbackRelease(room) {
+    if (!phaseState || !phaseState.pending.size || !isWaitingPhase(room.phase)) {
+      return;
+    }
+
+    if (phaseState.fallbackTimer) {
+      return;
+    }
+
+    const fallbackDelayMs = getFallbackDelayMs(room);
+
+    if (fallbackDelayMs === null) {
+      return;
+    }
+
+    phaseState.fallbackTimer = schedule(
+      `${room.phase} fallback release`,
+      () => {
+        if (!isCurrentPhaseState(room)) {
+          return;
+        }
+
+        releasePendingAgents(room, "fallback");
+      },
+      fallbackDelayMs,
+    );
+  }
+
+  function clearFallbackRelease() {
+    if (!phaseState?.fallbackTimer) {
+      return;
+    }
+
+    clearTrackedTimeout(phaseState.fallbackTimer);
+    phaseState.fallbackTimer = null;
+  }
+
+  function scheduleAgentRun(room, player, methodName, index, label) {
+    if (!phaseState || !isCurrentPhaseState(room)) {
+      return;
+    }
+
+    if (isAgentCommitted(player.id)) {
+      return;
+    }
+
+    phaseState.scheduled.add(player.id);
+
+    schedule(label, async () => {
+      if (!phaseState || !isCurrentPhaseState(room)) {
+        return;
+      }
+
+      if (phaseState.acted.has(player.id)) {
+        clearAgentScheduled(player.id);
+        return;
+      }
+
+      await runAgentMethod(room, player, methodName);
+      markAgentCompleted(room, player.id);
+    }, getInitialDelayMs(room.phase, index));
+  }
+
+  function releasePendingAgents(room, reason) {
+    if (!phaseState || !isCurrentPhaseState(room) || phaseState.pending.size === 0) {
+      return;
+    }
+
+    const pendingEntries = [...phaseState.pending.values()];
+    phaseState.pending.clear();
+    clearFallbackRelease();
+
+    pendingEntries.forEach((entry, index) => {
+      if (isAgentCommitted(entry.player.id)) {
+        return;
+      }
+
+      const releaseDelayMs = getReleaseDelayMs(room.phase, index);
+
+      if (room.phase === "chat") {
+        scheduleChatResponse(room, entry.player, releaseDelayMs);
+        return;
+      }
+
+      if (room.phase === "final_statements") {
+        scheduleTimedTextAction(room, entry.player, releaseDelayMs, {
           methodName: "getFinalStatementAction",
           expectedType: "SUBMIT_FINAL",
           phase: "final_statements",
-          timingLabel: "final statement",
+          timingLabel: `final statement (${reason})`,
         });
+        return;
+      }
+
+      phaseState.scheduled.add(entry.player.id);
+
+      schedule(`${entry.player.name} ${room.phase} release (${reason})`, async () => {
+        if (!phaseState || !isCurrentPhaseState(room)) {
+          return;
+        }
+
+        if (phaseState.acted.has(entry.player.id)) {
+          clearAgentScheduled(entry.player.id);
+          return;
+        }
+
+        await runAgentMethod(room, entry.player, entry.methodName);
+        markAgentCompleted(room, entry.player.id);
+      }, releaseDelayMs);
+    });
+  }
+
+  function registerPendingAgent(player, methodName, index) {
+    if (!phaseState || phaseState.pending.has(player.id)) {
+      return;
+    }
+
+    phaseState.pending.set(player.id, {
+      player,
+      methodName,
+      index,
+    });
+  }
+
+  function shouldReleasePendingNow(room) {
+    return hasBothHumansRespondedThisPhase(room);
+  }
+
+  function isRelevantHumanAction(room, action) {
+    const actorId = action.playerId || action.voterId || null;
+    const actor = room.players.find((player) => player.id === actorId);
+
+    if (!actor || actor.role !== "human") {
+      return false;
+    }
+
+    if (room.phase === "spark") {
+      return action.type === "SUBMIT_SPARK";
+    }
+
+    if (room.phase === "chat") {
+      return action.type === "SEND_CHAT";
+    }
+
+    if (room.phase === "final_statements") {
+      return action.type === "SUBMIT_FINAL";
+    }
+
+    return false;
+  }
+
+  function handleActionAccepted(room, action) {
+    if (!phaseState || !isCurrentPhaseState(room)) {
+      return;
+    }
+
+    if (!phaseState.pending.size || !isRelevantHumanAction(room, action)) {
+      return;
+    }
+
+    if (shouldReleasePendingNow(room)) {
+      logger?.info("agent release triggered by human responses", {
+        phase: room.phase,
+        round: room.round,
+        pendingAgents: phaseState.pending.size,
       });
+      releasePendingAgents(room, "humans_ready");
+    }
+  }
+
+  function handlePhaseEntered(room) {
+    cancelAll();
+    phaseState = createPhaseState(room);
+
+    const agents = room.players.filter((player) => player.role === "ai" && player.status === "alive");
+    const methodName = getActionMethodName(room);
+
+    logger?.info("agent manager handling phase", { phase: room.phase, agents: agents.length });
+
+    agents.forEach((player) => {
+      const agent = getRuntimeAgent(player);
+      agent.onPhaseStarted(buildAgentContext(room, player));
+    });
+
+    if (!methodName) {
+      return;
     }
 
     if (room.phase === "tiebreak_statements") {
-      const tiedAgents = agents.filter((agent) => room.tiebreakPlayerIds.includes(agent.id));
+      const tiedAgents = agents.filter((player) => room.tiebreakPlayerIds.includes(player.id));
 
       tiedAgents.forEach((agent, index) => {
         scheduleTimedTextAction(room, agent, 500 + index * 400, {
@@ -476,28 +846,60 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
           timingLabel: "tiebreak statement",
         });
       });
-    }
-
-    if (room.phase === "vote") {
-      agents.forEach((agent, index) => {
-        schedule(`${agent.name} vote`, () => runAgentMethod(room, agent, "getVoteAction"), 650 + index * 450);
-      });
+      return;
     }
 
     if (room.phase === "tiebreak_vote") {
-      const votingAgents = agents.filter((agent) => !room.tiebreakPlayerIds.includes(agent.id));
+      const votingAgents = agents.filter((player) => !room.tiebreakPlayerIds.includes(player.id));
 
-      votingAgents.forEach((agent, index) => {
-        schedule(
-          `${agent.name} tiebreak vote`,
-          () => runAgentMethod(room, agent, "getTiebreakVoteAction"),
-          650 + index * 450,
-        );
+      votingAgents.forEach((player, index) => {
+        scheduleAgentRun(room, player, methodName, index, `${player.name} tiebreak vote`);
       });
+      return;
+    }
+
+    if (room.phase === "vote") {
+      agents.forEach((player, index) => {
+        scheduleAgentRun(room, player, methodName, index, `${player.name} vote`);
+      });
+      return;
+    }
+
+    agents.forEach((player, index) => {
+      const agent = getRuntimeAgent(player);
+
+      if (shouldWaitForBothHumans(room, agent)) {
+        registerPendingAgent(player, methodName, index);
+        return;
+      }
+
+      if (room.phase === "chat") {
+        scheduleChatResponse(room, player, getInitialDelayMs(room.phase, index));
+        return;
+      }
+
+      if (room.phase === "final_statements") {
+        scheduleTimedTextAction(room, player, getInitialDelayMs(room.phase, index), {
+          methodName: "getFinalStatementAction",
+          expectedType: "SUBMIT_FINAL",
+          phase: "final_statements",
+          timingLabel: "final statement",
+        });
+        return;
+      }
+
+      scheduleAgentRun(room, player, methodName, index, `${player.name} ${room.phase}`);
+    });
+
+    if (shouldReleasePendingNow(room)) {
+      releasePendingAgents(room, "phase_ready");
+    } else {
+      scheduleFallbackRelease(room);
     }
   }
 
   return {
+    handleActionAccepted,
     handleChatActivity,
     handlePhaseEntered,
     cancelAll,
@@ -505,6 +907,11 @@ function createMockAgentManager({ applyAction, broadcastState, logger, submitAct
 }
 
 module.exports = {
+  AI_ROSTER,
+  WAIT_FOR_BOTH_CURRENT_PHASE,
+  USE_PRIOR_SIGNALS_NOW,
   createAiPlayers,
   createMockAgentManager,
+  createRuntimeAgent,
+  getFallbackDelayMs,
 };

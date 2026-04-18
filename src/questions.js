@@ -117,10 +117,11 @@ async function generateText(prompt) {
   return outputText;
 }
 
-function buildIdentityBlock(name, personality, gameplayPrompt = "") {
+function buildIdentityBlock(name, personality, mimicStrategyPrompt = "", gameplayPrompt = "") {
   return [
     `Name: ${String(name || "").trim() || "Player"}`,
     `Personality: ${String(personality || "").trim() || "neutral"}`,
+    mimicStrategyPrompt ? `Voice strategy: ${String(mimicStrategyPrompt).trim()}` : "",
     gameplayPrompt ? `Gameplay guidance: ${String(gameplayPrompt).trim()}` : "",
   ]
     .filter(Boolean)
@@ -135,10 +136,33 @@ function buildVoiceGuidance() {
     "Write with believable human looseness rather than polished assistant prose.",
     "It is okay to occasionally include a tiny typo, inconsistent capitalization, dropped punctuation, or slightly uneven phrasing if it fits this player.",
     "Do that lightly and inconsistently; the message should still be easy to read.",
-    "When human reply samples are provided, use them as the disguise anchor for length, specificity, punctuation, and casualness without copying exact phrases.",
-    "Do not copy another player's exact wording or collapse into a generic game-bot voice.",
+    "When human signals are provided, use both humans together as input rather than treating one person as the single anchor voice.",
+    "Never copy another player's exact wording, sentence skeleton, or standout phrase.",
+    "Follow the persona strategy: you may blend, remix, pivot away from, or answer from a noticeably different but still plausible angle.",
+    "Different should still feel readable, on-prompt, and human; do not become random, narrator-like, or joke-only.",
+    "Do not collapse into a generic game-bot voice.",
     "Always sound like a real player in a live lobby, never an assistant or narrator.",
   ].join(" ");
+}
+
+function formatGroupedHumanReplies(label, groups) {
+  const normalizedGroups = Array.isArray(groups) ? groups : [];
+
+  const summary = normalizedGroups
+    .map((group) => {
+      const replies = Array.isArray(group?.replies) ? group.replies : [];
+      const repliesSummary = replies.length
+        ? replies
+            .slice(-3)
+            .map((reply) => `${reply.kind}${reply.phase ? `/${reply.phase}` : ""}: ${reply.text}`)
+            .join(" | ")
+        : "none";
+
+      return `${group?.playerName || "Human"}: ${repliesSummary}`;
+    })
+    .join("\n");
+
+  return summary ? `${label}:\n${summary}` : "";
 }
 
 function summarizeHumanSignals(context) {
@@ -147,19 +171,18 @@ function summarizeHumanSignals(context) {
   }
 
   const humanPlayers = Array.isArray(context.humanPlayers) ? context.humanPlayers : [];
-  const humanReplies = Array.isArray(context.humanReplySamples) ? context.humanReplySamples : [];
+  const currentPhaseHumanReplies = Array.isArray(context.currentPhaseHumanReplies) ? context.currentPhaseHumanReplies : [];
+  const priorHumanReplies = Array.isArray(context.priorHumanReplies) ? context.priorHumanReplies : [];
   const playersSummary = humanPlayers.length
     ? humanPlayers.map((player) => `${player.name} (id=${player.id}, status=${player.status})`).join("\n")
-    : "";
-  const repliesSummary = humanReplies.length
-    ? humanReplies.map((reply) => `${reply.playerName} [${reply.kind}]: ${reply.text}`).join("\n")
     : "";
 
   return joinSections([
     playersSummary ? `Hidden human players:\n${playersSummary}` : "",
-    repliesSummary
-      ? `Human reply samples to mimic:\n${repliesSummary}`
-      : "Human reply samples to mimic: none yet. If nobody has spoken, stay casual and blend-ready.",
+    `Both humans responded this phase: ${context.bothHumansRespondedThisPhase ? "yes" : "no"}`,
+    formatGroupedHumanReplies("Current-phase human replies", currentPhaseHumanReplies),
+    formatGroupedHumanReplies("Prior human replies", priorHumanReplies) ||
+      "Prior human replies:\nnone yet. If the room is quiet, stay casual and blend-ready.",
   ]);
 }
 
@@ -203,7 +226,7 @@ async function createQuestion() {
   return question;
 }
 
-async function answerQuestion(name, personality, question, gameplayPrompt = "", options = {}) {
+async function answerQuestion(name, personality, mimicStrategyPrompt, question, gameplayPrompt = "", options = {}) {
   const answer = normalizeQuestion(
     await generateText([
       {
@@ -214,6 +237,7 @@ async function answerQuestion(name, personality, question, gameplayPrompt = "", 
             text: [
               "You are writing a short answer in a social deduction chat game.",
               "Stay in character using the provided personality.",
+              "Use the provided voice strategy.",
               "Follow the gameplay guidance if provided.",
               buildVoiceGuidance(),
               "Write like a human player, not an assistant.",
@@ -230,7 +254,7 @@ async function answerQuestion(name, personality, question, gameplayPrompt = "", 
           {
             type: "input_text",
             text: joinSections([
-              buildIdentityBlock(name, personality, gameplayPrompt),
+              buildIdentityBlock(name, personality, mimicStrategyPrompt, gameplayPrompt),
               summarizeContext(options.context),
               `Question: ${String(question || "").trim()}`,
             ]),
@@ -328,7 +352,7 @@ function summarizeContext(context) {
   ]);
 }
 
-async function createChatMessage(name, personality, gameplayPrompt, context) {
+async function createChatMessage(name, personality, mimicStrategyPrompt, gameplayPrompt, context) {
   const message = normalizeQuestion(
     await generateText([
       {
@@ -339,6 +363,7 @@ async function createChatMessage(name, personality, gameplayPrompt, context) {
             text: [
               "You are an in-character player in a social deduction chat game.",
               "Write exactly one public chat message.",
+              "Use the provided voice strategy.",
               buildVoiceGuidance(),
               "Keep it natural, suspicious, and conversational for this specific player.",
               "The line should feel like a real person typed it quickly in chat, not like edited copy.",
@@ -355,7 +380,7 @@ async function createChatMessage(name, personality, gameplayPrompt, context) {
           {
             type: "input_text",
             text: joinSections([
-              buildIdentityBlock(name, personality, gameplayPrompt),
+              buildIdentityBlock(name, personality, mimicStrategyPrompt, gameplayPrompt),
               summarizeContext(context),
             ]),
           },
@@ -377,7 +402,7 @@ async function createChatMessage(name, personality, gameplayPrompt, context) {
   return message;
 }
 
-async function createFinalStatement(name, personality, gameplayPrompt, context) {
+async function createFinalStatement(name, personality, mimicStrategyPrompt, gameplayPrompt, context) {
   const statement = normalizeQuestion(
     await generateText([
       {
@@ -388,6 +413,7 @@ async function createFinalStatement(name, personality, gameplayPrompt, context) 
             text: [
               "You are making a final statement in a social deduction game.",
               "Write exactly one short final statement.",
+              "Use the provided voice strategy.",
               buildVoiceGuidance(),
               "It should be a defense, accusation, or final read.",
               "Even under pressure, keep it human and not overly polished.",
@@ -403,7 +429,7 @@ async function createFinalStatement(name, personality, gameplayPrompt, context) 
           {
             type: "input_text",
             text: joinSections([
-              buildIdentityBlock(name, personality, gameplayPrompt),
+              buildIdentityBlock(name, personality, mimicStrategyPrompt, gameplayPrompt),
               summarizeContext(context),
             ]),
           },
@@ -425,7 +451,7 @@ async function createFinalStatement(name, personality, gameplayPrompt, context) 
   return statement;
 }
 
-async function createTiebreakStatement(name, personality, gameplayPrompt, context) {
+async function createTiebreakStatement(name, personality, mimicStrategyPrompt, gameplayPrompt, context) {
   const statement = normalizeQuestion(
     await generateText([
       {
@@ -436,6 +462,7 @@ async function createTiebreakStatement(name, personality, gameplayPrompt, contex
             text: [
               "You are in the tiebreak statement phase of a social deduction game.",
               "Write exactly one short tiebreak statement.",
+              "Use the provided voice strategy.",
               buildVoiceGuidance(),
               "Sound like a player under pressure and make a final case.",
               "Pressure can make the wording a little messier, but it should still sound natural.",
@@ -451,7 +478,7 @@ async function createTiebreakStatement(name, personality, gameplayPrompt, contex
           {
             type: "input_text",
             text: joinSections([
-              buildIdentityBlock(name, personality, gameplayPrompt),
+              buildIdentityBlock(name, personality, mimicStrategyPrompt, gameplayPrompt),
               summarizeContext(context),
             ]),
           },
@@ -473,7 +500,7 @@ async function createTiebreakStatement(name, personality, gameplayPrompt, contex
   return statement;
 }
 
-async function chooseVoteTarget(name, personality, gameplayPrompt, context) {
+async function chooseVoteTarget(name, personality, mimicStrategyPrompt, gameplayPrompt, context) {
   const legalTargets = Array.isArray(context?.legalTargets) ? context.legalTargets : [];
 
   if (legalTargets.length === 0) {
@@ -490,7 +517,7 @@ async function chooseVoteTarget(name, personality, gameplayPrompt, context) {
             text: [
               "You are choosing a vote target in a social deduction game.",
               "Choose exactly one player from the legal targets.",
-              "Use the provided personality and gameplay guidance to decide who feels most suspect, but reply with the chosen target id only.",
+              "Use the provided personality, voice strategy, and gameplay guidance to decide who feels most suspect, but reply with the chosen target id only.",
               "Reply with the chosen target id only.",
               "Do not add any other text.",
             ].join(" "),
@@ -503,7 +530,7 @@ async function chooseVoteTarget(name, personality, gameplayPrompt, context) {
           {
             type: "input_text",
             text: joinSections([
-              buildIdentityBlock(name, personality, gameplayPrompt),
+              buildIdentityBlock(name, personality, mimicStrategyPrompt, gameplayPrompt),
               summarizeContext(context),
             ]),
           },
@@ -537,9 +564,12 @@ async function chooseVoteTarget(name, personality, gameplayPrompt, context) {
 
 module.exports = {
   answerQuestion,
+  buildIdentityBlock,
+  buildVoiceGuidance,
   chooseVoteTarget,
   createChatMessage,
   createFinalStatement,
   createQuestion,
   createTiebreakStatement,
+  summarizeContext,
 };
