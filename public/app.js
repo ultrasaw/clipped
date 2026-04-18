@@ -808,6 +808,7 @@ if (currentRoomId) {
   document.body.dataset.screen = "rooms";
   document.documentElement.dataset.screen = "rooms";
   loadRooms();
+  setInterval(loadRooms, 4000);
 }
 
 setInterval(() => {
